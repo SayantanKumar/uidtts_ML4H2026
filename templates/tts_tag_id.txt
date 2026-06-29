@@ -1,0 +1,18 @@
+You are an expert physician examining case reports to construct clinical timelines.  The first step is to tag each clinical event mention from the given case report. An event mention is a finding about the individual (i) that affects or could affect their health or the knowledge of their health, and (ii) that can in principle be temporally located.  
+
+Details:
+Include all patient events, even if they appear in the discussion.  Do not omit any events. For example, include termination/discontinuation events; include the pertinent negative findings, like 'no shortness of breath' and 'denies chest pain'; include procedures, transfers, referrals, social and family context, symptoms, signs, diagnostics, and so on.  In other words, include the events if they may affect predictive or explanatory models about the individual. Static features without exact temporal location (e.g. smoking use, family history) should still be included. Ensure the mention text can stand alone when removed from its context, i.e., very concise yet containing the necessary context and detail that distinguishes its occurrence.
+Separate conjunctive phrases into its component events and assign them the same timestamp (for example, the separation of 'fever and rash' into 2 events: 'fever' and 'rash'; similarly "18 year old male" into "18 year old" and "male"). Attempt to use contextual modification, such as 'history of', where applicable.
+
+For the output, rewrite the report with tagging, i.e., with tags for each event mention, for example: <tag id="m-1" mention="fever persisted"> fever </tag> and <tag id="m-2" mention="rash persisted"> rash </tag> persisted is the output from the phrase "fever and rash persisted".  Ensure the closing tag matches the opening tag.  The case report should be unchanged (verbatim) except for the tags.
+
+Example case report:
+
+An 18-year-old male was admitted to the hospital with a 3-day history of fever and rash. Four weeks ago, he was diagnosed with acne and received the treatment with minocycline, 100 mg daily, for 3 weeks. With increased WBC count, eosinophilia, and systemic involvement, this patient was diagnosed with DRESS syndrome. The fever and rash persisted through admission, and diffuse erythematous or maculopapular eruption with pruritus was present. One day later the patient was discharged.
+
+Example output:
+
+An <tag id="m-1" mention="18 year old"> 18-year-old </tag> <tag id="m-2" mention="male"> male </tag> was <tag id="m-3" mention="admitted to the hospital"> admitted to the hospital </tag> with a 3-day history of <tag id="m-4" mention = "fever"> fever </tag> and <tag id="m-5" mention="rash"> rash </tag>. Four weeks ago, he was <tag id="m-6" mention="diagnosed with acne"> diagnosed with acne </tag> and received the <tag id="m-7" mention="treatment with minocycline 100mg QD for 3 weeks"> treatment with minocycline, 100 mg daily, for 3 weeks </tag>. With <tag id="m-8" mention="increased white blood cell count"> increased WBC count </tag>, <tag id="m-9" mention="eosinophilia"> eosinophilia </tag>, and <tag id="m-10" mention="systemic involvement"> systemic involvement </tag>, this patient was <tag id="m-11" mention="diagnosed with DRESS syndrome"> diagnosed with DRESS syndrome </tag>. The <tag id="m-12" mention="fever persisted"> fever </tag> and <tag id="m-13" mention="rash persisted"> rash </tag> persisted through admission, and <tag id="m-14" mention="diffuse erythematous or maculopapular eruption"> diffuse erythematous or maculopapular eruption </tag> with <tag id="m-15" mention="pruritis"> pruritus </tag> was present. One day later the patient was <tag id="m-16" mention="discharged"> discharged </tag>.
+
+Create a tagged report from the following case.
+

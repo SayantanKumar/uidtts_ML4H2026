@@ -1,0 +1,64 @@
+  
+
+# ###Table###
+1 | 46 years old | 0
+2 | male | 0
+3 | weighing 63 kg | 0
+4 | ulcerative colitis | 0
+5 | malaise | -72
+6 | fever | -72
+7 | loss of appetite | -72
+8 | blood pressure 124/46 mmHg | 0
+9 | heart rate 122 beats per min | 0
+10 | SpO2 98% in room air | 0
+11 | respiratory rate 16/min | 0
+12 | body temperature 40.2°C | 0
+13 | alert | 0
+14 | lying in bed because of chills | 0
+15 | nausea | 0
+16 | cardiac arrest | 0
+17 | chest compression initiated | 0
+18 | tracheal intubation initiated | 0
+19 | ECG showed ventricular fibrillation | 0
+20 | defibrillation performed twice | 0
+21 | adrenaline administered once | 0
+22 | resuscitation successful | 0
+23 | ECG showed coved-type ST elevation in V1 and V2 | 0
+24 | diagnosed with Brugada syndrome | 0
+25 | fever subsided with acetaminophen | 24
+26 | HC level 14.8 mg/dL | 0
+27 | admitted to intensive care unit | 0
+28 | hypotension developed | 24
+29 | septic shock suspected from ulcerative colitis exacerbation | 24
+30 | CT scan showed high-density area in descending colon | 24
+31 | lactate level increased | 24
+32 | white blood cell count increased | 24
+33 | procalcitonin level increased | 24
+34 | tazobactam-piperacillin initiated | 24
+35 | vasopressors initiated | 24
+36 | extubation performed | 48
+37 | fever reoccurred | 120
+38 | contrast-enhanced CT scan revealed round low-density area of liver in both arterial and venous phases | 120
+39 | liver abscess determined | 120
+40 | antibiotics changed to meropenem and vancomycin | 120
+41 | meropenem and vancomycin maintained for 3 weeks | 120
+42 | puncture drainage performed | 120
+43 | infection controlled | 720
+44 | positive pilsicainide test result confirmed | 720
+45 | implantable cardioverter defibrillator implanted | 720
+46 | discharged | 720
+47 | family history of sudden death in maternal uncle | 0
+48 | high parathyroid hormone levels | 0
+49 | Tc scintigraphy showed abnormal uptake in anterior mediastinum | 0
+50 | tumor resection performed | 2160
+51 | ECG followed up | 2160
+52 | serum calcium level followed up | 2160
+53 | serum calcium level treated | 2160
+54 | ectopic parathyroid adenoma pathologically diagnosed | 2160
+55 | CT revealed nonfunctional pituitary adenoma | 2160
+56 | MRI revealed nonfunctional adrenal tumor | 2160
+57 | multiple endocrine neoplasia type 1 presumed | 2160
+58 | early repolarization pattern on ECG September 25 2017 | -32280
+
+# ###Tagged Text###
+<tag_1 mention="46-year-old"> A 46-year-old </tag_1> <tag_2 mention="male"> man </tag_2> <tag_3 mention="weighing 63 kg"> weighing 63 kg </tag_3> with <tag_4 mention="ulcerative colitis"> ulcerative colitis </tag_4> had <tag_5 mention="malaise"> malaise </tag_5>, <tag_6 mention="fever"> fever </tag_6>, and <tag_7 mention="loss of appetite"> loss of appetite </tag_7> 3 days before admission. On arrival at the emergency department, his <tag_8 mention="blood pressure 124/46 mmHg"> blood pressure was 124/46 mmHg </tag_8>, <tag_9 mention="heart rate 122 beats per min"> heart rate was 122 beats per min </tag_9>, <tag_10 mention="SpO2 98% in room air"> SpO2 was 98% in room air </tag_10>, <tag_11 mention="respiratory rate 16/min"> respiratory rate was 16/min </tag_11>, <tag_12 mention="body temperature 40.2°C"> body temperature was 40.2°C </tag_12>, and he was <tag_13 mention="alert"> alert </tag_13>. He was <tag_14 mention="lying in bed because of chills"> lying in bed because of chills </tag_14> and <tag_15 mention="nausea"> nausea </tag_15>. Suddenly, the patient <tag_16 mention="developed cardiac arrest"> developed cardiac arrest </tag_16>, and <tag_17 mention="chest compression initiated"> chest compression </tag_17> and <tag_18 mention="tracheal intubation initiated"> tracheal intubation </tag_18> were immediately initiated. <tag_19 mention="ECG showed ventricular fibrillation"> Electrocardiogram (ECG) showed ventricular fibrillation (VF) </tag_19>. <tag_20 mention="defibrillation performed twice"> Defibrillation was performed twice </tag_20>, and <tag_21 mention="adrenaline administered once"> adrenaline was administered once </tag_21>. After <tag_22 mention="resuscitation successful"> resuscitating the patient </tag_22>, a cardiologist <tag_23 mention="diagnosed with Brugada syndrome"> diagnosed the patient with BS </tag_23> because the <tag_24 mention="ECG showed coved-type ST elevation in V1 and V2"> ECG showed a "coved-type" ST elevation in V1 and V2 </tag_24>. This was <tag_25 mention="fever subsided with acetaminophen"> improved when the patient's fever subsided with acetaminophen </tag_25>. He also had <tag_26 mention="HC level 14.8 mg/dL"> HC level of 14.8 mg/dL </tag_26> at the same time. After <tag_27 mention="admitted to intensive care unit"> admission to the intensive care unit </tag_27>, he <tag_28 mention="hypotension developed"> developed hypotension </tag_28>. We <tag_29 mention="septic shock suspected from ulcerative colitis exacerbation"> suspected septic shock from ulcerative colitis exacerbation </tag_29> because <tag_30 mention="CT scan showed high-density area in descending colon"> computed tomography (CT) scan showed a high-density area in the descending colon </tag_30> and blood sample data, which <tag_31 mention="lactate level increased"> showed an increase in the lactate level </tag_31>, <tag_32 mention="white blood cell count increased"> white blood cell count </tag_32>, and <tag_33 mention="procalcitonin level increased"> procalcitonin level </tag_33>. We <tag_34 mention="tazobactam-piperacillin initiated"> initiated tazobactam-piperacillin </tag_34> and <tag_35 mention="vasopressors initiated"> vasopressors </tag_35>. On <tag_36 mention="extubation performed"> day 2 of admission, extubation was performed </tag_36> because the patient was stable. On <tag_37 mention="fever reoccurred"> day 5 of admission, fever reoccurred </tag_37>, and <tag_38 mention="contrast-enhanced CT scan revealed round low-density area of liver in both arterial and venous phases"> a contrast-enhanced CT scan revealed a round low-density area of his liver in both the arterial and venous phases </tag_38>, which was <tag_39 mention="liver abscess determined"> determined to be a liver abscess </tag_39>. We <tag_40 mention="antibiotics changed to meropenem and vancomycin"> changed the antibiotics to meropenem and vancomycin </tag_40> and <tag_41 mention="meropenem and vancomycin maintained for 3 weeks"> maintained the same for 3 weeks </tag_41> and <tag_42 mention="puncture drainage performed"> performed puncture drainage </tag_42>. After the <tag_43 mention="infection controlled"> infection was controlled </tag_43>, on <tag_44 mention="positive pilsicainide test result confirmed"> day 30 of admission, the cardiologist confirmed a positive pilsicainide test result </tag_44>, and <tag_45 mention="implantable cardioverter defibrillator implanted"> implantation of an implantable cardioverter defibrillator (ICD) was performed </tag_45>. The patient was then <tag_46 mention="discharged"> discharged </tag_46>. The patient's <tag_47 mention="family history of sudden death in maternal uncle"> family history revealed that one of his maternal uncles had experienced sudden death </tag_47>. An endocrinologist examined the causes of HC. It was associated with <tag_48 mention="high parathyroid hormone levels"> high parathyroid hormone levels </tag_48>, and on investigation with Tc scintigraphy, <tag_49 mention="Tc scintigraphy showed abnormal uptake in anterior mediastinum"> abnormal uptake in the anterior mediastinum was observed </tag_49>. After his <tag_50 mention="tumor resection performed"> discharge, tumor resection was performed </tag_50>. Further, <tag_51 mention="ECG followed up"> ECG </tag_51> and <tag_52 mention="serum calcium level followed up"> serum calcium level </tag_52> were <tag_53 mention="serum calcium level treated"> followed up and treated </tag_53>. Pathological diagnosis was determined for <tag_54 mention="ectopic parathyroid adenoma pathologically diagnosed"> an ectopic parathyroid adenoma </tag_54>. In addition, <tag_55 mention="CT revealed nonfunctional pituitary adenoma"> CT </tag_55> and <tag_56 mention="MRI revealed nonfunctional adrenal tumor"> magnetic resonance imaging </tag_56> revealed tumors in the pituitary and adrenal glands. The endocrinologist proved that these were nonfunctional pituitary adenomas and nonfunctional adrenal tumors. The patient was finally <tag_57 mention="multiple endocrine neoplasia type 1 presumed"> presumed to have multiple endocrine neoplasia type 1 (MEN1) </tag_57>. <tag_58 mention="early repolarization pattern on ECG September 25 2017"> ECG taken on September 25, 2017, showed J point elevation in I, aVL, V2, V4–V6. This is early repolarization pattern </tag_58>. There were no data on the serum calcium level.

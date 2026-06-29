@@ -1,0 +1,23 @@
+You are a medical expert analyzing clinical case reports. Given the following tagged case report and mention table, provide detailed temporal analysis for each clinical event.
+
+Tagged Case Report:
+{{tagged_case_report}}
+
+Mention Table:
+{{mention_table}}
+
+For each event in the mention table, provide:
+1. The precise temporal relationship to admission (0 hours)
+2. Any duration or interval information
+3. Clinical significance and progression patterns
+4. Any inferred temporal relationships based on clinical context
+
+Output format:
+# ###Temporal Analysis###
+For each event number:
+- Event: [mention text]
+- Time: [hours from admission]
+- Duration: [if applicable]
+- Clinical context: [why this timing is clinically relevant]
+
+Create the temporal analysis output from the above case:

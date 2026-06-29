@@ -1,0 +1,29 @@
+You are a medical expert analyzing clinical case reports. Given the following tagged case report and mention table, provide detailed temporal characerization for each clinical event.
+
+Tagged Case Report:
+{{tagged_case_report}}
+
+Mention Table:
+{{mention_table}}
+
+Specifically, for each event in the mention table, provide:
+1. The precise temporal relationship to admission (0 hours), with negative times for times prior to admission.  Use time of case presentation if no admission occurs. Assign static/indefinite events to time 0.  Partially known times should use the time indicated by the most probable timeline given the contextual information. Fully unnknown times should have time N/A.  Both can later be resolved via reasoning with information from step 4 below.
+2. Any duration or interval information, in the form of a lower and upper bound relative to time 0
+3. A flag set to 1 if the time is absolute or with explicit reference to time 0, else 0 (i.e., may be improved via reasoning or other contextual information).
+4. The list of mention uuids that best contextualize when the event occurs, in order of relevance (no more than 5).
+
+Output format: a bsv table with columns for uid4 (the ones used in the mention table), mention, relative time, duration [lb, ub], known, and context vector as a uid4 list, e.g.:
+Note the tag number should be omitted from the table but the uid4 retained.
+
+uid4 | mention | time | bounds | known | context uid4s
+34ae | presents with a 3-day history of rash | -72 | [-72, 0] | 0 | []
+af4b | discharge to home | 24 | [24, 24] | 0 | [b4f1]
+
+Reasoning Instructions:
+Remember to use <think> and </think> tags for the reasoning section.
+
+Place the table output after the "</think>" tag/token. Place it inside a tagged block, e.g.,
+<answer> 
+uid4 | mention | time | bounds | known | context uid4s
+BSV TABLE HERE
+</answer>

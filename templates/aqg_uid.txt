@@ -1,0 +1,43 @@
+We are trying to locate the timing of events (times relative to time of admission) in a discharge summary. We have an accessory EHR database with tables such as labs, inputs/outputs, medications, charting, and so on, that may have timestamped rows that help us identify the discharge summary event timings better.
+
+Given the following discharge summary excerpts and the UID mention table, suggest concise structured-data queries that might help temporally locate each mention.
+
+Return only valid JSON. Do not include markdown, prose, comments, or trailing commas.
+
+Only include UIDs present in the provided mention table. For each UID, return 1 to 3 concise query strings.
+
+Output format:
+{{ "<uid4_1> mention_1" : ["structured-data query 1", "structured-data query 2"], "...": ["..."] }}
+
+Each mention uid4 should have suggested queries.
+
+Example table:
+
+uid4 | mention
+0a1b | development of new pneumonia during hospitalization
+a5d3 | creatinine of 4.2
+bb1a | A LP was then performed to look for Leptomeningeal disease
+
+Example output:
+
+{{
+"<0a1b> development of new pneumonia during hospitalization":
+ [
+    "Radiology report timestamps for chest X-ray showing new pneumonia findings",
+    "Antibiotic administration records (vancomycin, cefepime, flagyl) start times",
+    "Nursing documentation of respiratory status changes and oxygen requirement increases"
+ ],
+ "<a5d3> creatinine of 4.2":
+ [
+    "Matching laboratory finding of Cr 4.2",
+    "Chart event for serum blood collection after noted decreased urine output"
+ ],
+ "<bb1a> A LP was then performed to look for Leptomeningeal disease":
+ [ "Lumbar puncture procedure times",
+   "CSF fluid sent for laboratory analysis",
+   "PCR or cytology results on cerebrospinal fluid"
+ ]
+}}
+
+Case report and mention table: 
+{case_report_txt}

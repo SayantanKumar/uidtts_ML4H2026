@@ -1,0 +1,39 @@
+You are a physician.  Extract the clinical events and the related time stamp from the case report. An event is a finding about the individual that affects or could affect their health and can be temporally located.  The admission event has timestamp 0. If the event is not available, we treat the event, e.g. current main clinical diagnosis or treatment with timestamp 0. The events happened before event with 0 timestamp have negative time, the ones after the event with 0 timestamp have positive time. The timestamp are in hours. The unit will be omitted when output the result. If there is no temporal information of the event, please use your knowledge and events with temporal expression before and after the events to provide an approximation. We want to predict the future events given the events happened in history. For example, here is the case report.
+An 18-year-old male was admitted to the hospital with a 3-day history of fever and rash. Four weeks ago, he was diagnosed with acne and received the treatment with minocycline, 100 mg daily, for 3 weeks. With increased WBC count, eosinophilia, and systemic involvement, this patient was diagnosed with DRESS syndrome. The fever and rash persisted through admission, and diffuse erythematous or maculopapular eruption with pruritus was present. One day later the patient was discharged.
+Let's find the locations of event in the case report, it shows that four weeks ago of fever and rash, four weeks ago, he was diagnosed with acne and receive treatment. So the event of fever and rash happen four weeks ago, 672 hours, it is before admitted to the hospital, so the time stamp is -672. diffuse erythematous or maculopapular eruption with pruritus was documented on the admission exam, so the time stamp is 0 hours, since it happens right at admission. DRESS syndrome has no specific time, but it should happen soon after admission to the hospital, so we use our clinical judgment to give the diagnosis of DRESS syndrome the timestamp 0. then the tabular output should look like
+
+1 | 18 years old| 0
+2 | male | 0 
+3 | admitted to the hospital | 0
+4 | fever | -72
+5 | rash | -72
+6 | acne |  -672
+7 | minocycline |  -672
+8 | increased WBC count | 0
+9 | eosinophilia| 0
+10 | systemic involvement| 0
+11 | diffuse erythematous or maculopapular eruption| 0
+12 | pruritis | 0
+13 |DRESS syndrome | 0
+14 |fever persisted | 0
+15 |rash persisted | 0
+16 | discharged | 24
+Separate conjunctive phrases into its component events and assign them the same timestamp (for example, the separation of 'fever and rash' into 2 events: 'fever' and 'rash')  If the event has duration, assign the event time as the start of the time interval. Attempt to use the text span without modifications except 'history of' where applicable. Include all patient events, even if they appear in the discussion; do not omit any events; include termination/discontinuation events; include the pertinent negative findings, like 'no shortness of breath' and 'denies chest pain'.  Ensure the mention text can stand alone and contains the relevant context and detail that distinguishes its occurrence.
+
+For the tagged output, rewrite the report with tagging, i.e., with tags for each event mention, for example: <tag_1 mention="fever persisted"> fever </tag_1> and <tag_2 mention="rash persisted"> rash </tag_2> persisted is the output from the phrase "fever and rash persisted".
+
+So for the paragraph above, the tagged output would be:
+
+An <tag_1 mention="18 year old"> 18-year-old </tag_1> <tag2 mention="male"> male </tag_2> was <tag_3 mention="admitted to the hospital"> admitted to the hospital </tag_3> with a 3-day history of <tag_4 mention = "fever"> fever </tag_4> and <tag_5 mention="rash"> rash </tag_5>. Four weeks ago, he was <tag_6 mention="diagnosed with acne"> diagnosed with acne </tag_6> and received the <tag_7 mention="treatment with minocycline 100mg QD for 3 weeks"> treatment with minocycline, 100 mg daily, for 3 weeks </tag_7>. With <tag_8 mention="increased white blood cell count"> increased WBC count </tag_8>, <tag_9 mention="eosinophilia"> eosinophilia </tag_9>, and <tag_10 mention="systemic involvement"> systemic involvement </tag_10>, this patient was <tag_11 mention="diagnosed with DRESS syndrome"> diagnosed with DRESS syndrome </tag_11>. The <tag_12 mention="fever persisted"> fever </tag_12> and <tag_13 mention="rash persisted"> rash </tag_13> persisted through admission, and <tag_14 mention="diffuse erythematous or maculopapular eruption"> diffuse erythematous or maculopapular eruption </tag_14> with <tag_15 mention="pruritis"> pruritus </tag_15> was present. One day later the patient was <tag_16 mention="discharged"> discharged </tag16>.
+
+Ensure the 1-to-1 correspondence between the first column in the output table and the tag number <tag_...> in the tagged report (with matching mentions). The final output should be in two parts with markdown-style headers "# ###Table###" and "# ###Tagged Text###":
+
+# ###Table###
+1 | <event 1> | <time 1> \n
+2 | <event 2> | <time 2> \n
+...
+
+# ###Tagged Text###
+<...tagged report text...>
+
+Create the output from the following case:
