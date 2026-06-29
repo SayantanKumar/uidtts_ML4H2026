@@ -1,0 +1,757 @@
+"""
+Assign jointly plausible timelines to mentions using LLM reasoning at the case report level.
+Outputs a JSON structure with reasoning and multiple plausible timelines.
+Usage:
+python assign_joint_timestamps.py \
+--anchor-results ./data/joined_anchor_source.csv \
+--case-report ./data/case_report.txt \
+--mention-table ./data/10056200-DS_temporal.txt.gz \
+--output ./data/10056200-DS_timelines.json \
+--tau 0.1 \
+--host localhost \
+--port 8080
+"""
+import pandas as pd
+from pathlib import Path
+import argparse
+import os
+from typing import Dict, List, Any, Tuple
+import httpx
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.messages.ai import AIMessage
+import json
+import re
+from datetime import datetime
+import gzip
+import requests
+from call_lcpp import query_llama_cpp  # Import the function from call_lcpp.py
+
+FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
+MENTION_TABLE_RE = re.compile(r"\n\s*Mention table:\s*\n", re.IGNORECASE)
+
+def read_case_report(case_report_file: Path) -> str:
+    """Read the case report text from file, handling both .txt and .txt.gz files."""
+    if case_report_file.suffix == '.gz':
+        with gzip.open(case_report_file, 'rt', encoding='utf-8') as f:
+            return f.read()
+    else:
+        with open(case_report_file, 'r', encoding='utf-8') as f:
+            return f.read()
+
+def read_mention_table(mention_file: Path) -> pd.DataFrame:
+    """Read mention table from .bsv.gz file."""
+    with gzip.open(mention_file, 'rt', encoding='utf-8') as f:
+        return f.read()
+
+def extract_note_id_from_case_report_path(case_report_file: Path) -> str:
+    """Extract note_id from the case report file path."""
+    filename = case_report_file.name
+    if filename.endswith('.txt.gz'):
+        return filename[:-7]
+    elif filename.endswith('.txt'):
+        return filename[:-4]
+    else:
+        return filename.split('.')[0]
+
+def convert_timestamp_to_datetime(timestamp_int: int) -> str:
+    """Convert integer timestamp (Unix time) to formatted datetime string in UTC."""
+    try:
+        dt = datetime.utcfromtimestamp(timestamp_int)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+    except (ValueError, TypeError):
+        return str(timestamp_int)
+
+def read_note_link_times(note_link_file: Path, note_id: str) -> Dict[str, str]:
+    """Read note_link.csv.gz and extract admission/discharge times."""
+    if not note_link_file.exists():
+        return {}
+    try:
+        df = pd.read_csv(
+            note_link_file,
+            compression='gzip' if note_link_file.suffix == '.gz' else None,
+            dtype={'note_id': str, 'hadm_id': str},
+        )
+        if 'note_id' not in df.columns:
+            print(f"Error reading note_link: missing note_id column in {note_link_file}")
+            return {}
+
+        df['note_id'] = df['note_id'].astype(str)
+        lookup_note_id = str(note_id).replace('.txt', '')
+
+        matching_row = df[df['note_id'] == lookup_note_id]
+        if matching_row.empty:
+            matching_row = df[df['note_id'].str.startswith(f"{lookup_note_id}-")]
+            if matching_row.empty:
+                return {}
+        return {
+            'admittime': matching_row.iloc[0]['admittime'],
+            'dischtime': matching_row.iloc[0]['dischtime']
+        }
+    except Exception as e:
+        print(f"Error reading note_link: {e}")
+        return {}
+
+def truncate_text(value: Any, max_chars: int) -> str:
+    text = "" if pd.isna(value) else str(value)
+    text = re.sub(r"\s+", " ", text).strip()
+    if max_chars > 0 and len(text) > max_chars:
+        return text[:max_chars].rstrip() + "..."
+    return text
+
+def strip_embedded_mention_table(case_report: str) -> str:
+    """Bundle reports already append a mention table; Step 6 adds it separately."""
+    return MENTION_TABLE_RE.split(case_report, maxsplit=1)[0].strip()
+
+def parse_mention_rows(mention_table: str) -> List[Tuple[str, str]]:
+    rows = []
+    for raw_line in mention_table.splitlines():
+        line = raw_line.strip()
+        if not line or line.lower().startswith("uid4"):
+            continue
+        if "|" not in line:
+            continue
+        uid, rest = line.split("|", 1)
+        uid = uid.strip().strip("<>")
+        mention = rest.split("|", 1)[0].strip()
+        if uid and mention:
+            rows.append((uid, mention))
+    return rows
+
+def compact_case_report(case_report: str,
+                        mention_table: str,
+                        max_chars: int,
+                        context_chars: int = 240) -> str:
+    """Keep local context around uid4 tags, falling back to a front slice."""
+    report_body = strip_embedded_mention_table(case_report)
+    if max_chars <= 0 or len(report_body) <= max_chars:
+        return report_body
+
+    snippets = []
+    used_ranges = []
+    for uid, _mention in parse_mention_rows(mention_table):
+        pattern = re.compile(rf"<{re.escape(uid)}>(.*?)</{re.escape(uid)}>", re.DOTALL)
+        for match in pattern.finditer(report_body):
+            start = max(0, match.start() - context_chars)
+            end = min(len(report_body), match.end() + context_chars)
+            if any(abs(start - old_start) < 100 and abs(end - old_end) < 100 for old_start, old_end in used_ranges):
+                continue
+            used_ranges.append((start, end))
+            snippet = re.sub(r"\s+", " ", report_body[start:end]).strip()
+            if snippet:
+                snippets.append(f"[<{uid}>] {snippet}")
+            if sum(len(s) + 1 for s in snippets) >= max_chars:
+                return "\n".join(snippets)[:max_chars]
+
+    if snippets:
+        return "\n".join(snippets)[:max_chars]
+
+    return report_body[:max_chars]
+
+def prepare_candidates_data(anchor_df: pd.DataFrame,
+                            tau: float,
+                            max_total_candidates: float = 300,
+                            top_k: int = 10,
+                            max_field_chars: int = 180) -> List[Dict]:
+    """Prepare candidate data for LLM from anchor results."""
+    filtered_df = anchor_df[anchor_df['score'] >= tau].copy()
+    filtered_df = (
+        filtered_df.sort_values(['anchor', 'score'], ascending=[True, False])
+        .groupby('anchor')
+        .head(top_k)
+        .reset_index(drop=True)
+    )
+    filtered_df = filtered_df.head(max_total_candidates)
+    
+    candidates = []
+    for rowi, row in filtered_df.iterrows():
+        # Extract anchor text from query
+        anchor_text = re.search(r"Information regarding:\s*(.*?)(?:, in particular:|$)", row['anchor'])
+        if anchor_text:
+            anchor_text = anchor_text.group(1).strip()
+        else:
+            anchor_text = row['anchor']
+        
+        # Find uid4 in anchor text
+        uid_match = re.search(r'<([0-9a-f]{4})>', anchor_text)
+        uid = uid_match.group(1) if uid_match else None
+        
+        candidates.append({
+            'anchor': truncate_text(re.sub(r'<[^>]+>', '', anchor_text), max_field_chars),
+            'uid': uid,
+            'score': f"{round(float(row['score']),3):.3f}",
+            'timestamp': convert_timestamp_to_datetime(row['line_level_timestamp']),
+            'event': truncate_text(row['line_level_event'], max_field_chars),
+            'value': truncate_text(row['line_level_value'], max_field_chars)
+        })
+    return candidates
+
+def query_openai_chat(messages: List[Dict], server_url: str, max_tokens: int = 100000) -> str:
+    """Query OpenAI-compatible chat completions endpoint."""
+    url = f"{server_url}/v1/chat/completions"
+    payload = {
+        "model": "default",
+        "messages": messages,
+        "max_tokens": min(max_tokens, 120000),  # Cap to avoid server issues
+        "temperature": 0.7,
+        "repeat_penalty": 1.18,  # These are also in query_llama_cpp
+        "repeat_last_n": 256,
+        "presence_penalty": 0.6
+    }
+    try:
+        r = requests.post(url, json=payload)
+        if r.status_code == 200:
+            response_data = json.loads(r.text)
+            return response_data['choices'][0]['message']['content']
+        else:
+            print(f"OpenAI endpoint error: {r.status_code}")
+            return ""
+    except Exception as e:
+        print(f"Error querying OpenAI endpoint: {e}")
+        return ""
+
+def strip_code_fences(text: str) -> str:
+    text = text.strip()
+    m = FENCE_RE.search(text)
+    return m.group(1).strip() if m else text
+
+def parse_or_repair_json(result: str, llm, attempt: int):
+    text = strip_code_fences(result)
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            return json.loads(text + "}")
+        except:
+            pass
+        pass
+
+    print(f"JSON parsing llm try {attempt+1}")
+    # CLAIM_EVIDENCE_SCHEMA = {
+    #     "name": "timeline_reasoning",
+    #     "schema": {
+    #         "type": "object",
+    #         "additionalProperties": {
+    #             "type": "array",
+    #             "items": {"type": "string"}
+    #         }
+    #     },
+    #     "strict": True
+    # }
+    # structured_llm = llm.with_structured_output(CLAIM_EVIDENCE_SCHEMA)
+    
+    # chain = prompt | llm | StrOutputParser()
+
+    repair_grounding = ChatPromptTemplate.from_messages([
+        ("system", "You are a data engineer."),
+        ("user", "Fix this so it is valid JSON.\nReturn ONLY JSON.\n\n{bad_json}"),
+    ])
+
+    # repair_chain = repair_grounding | llm | StrOutputParser()
+    repair_chain = repair_grounding | llm
+    repair_result = strip_code_fences(repair_chain.invoke({"bad_json": text}).content)
+
+    return json.loads(repair_result)
+
+def has_meaningful_content(llm_structured_output,
+        *,
+        min_rows: int = 2,
+        min_cols: int = 2,
+        min_chars: int = 20,
+) -> Tuple[bool, Any]:
+    """
+    Validate LLM output.
+
+    Returns:
+        should_retry (bool)
+        parsed_output (Any | None)
+    """
+    if not isinstance(llm_structured_output, dict) or not llm_structured_output:
+        return False, llm_structured_output
+
+    if 'timelines' not in llm_structured_output.keys() or 'reasoning_summary' not in llm_structured_output.keys():
+        return False, llm_structured_output
+
+    parsed = llm_structured_output['timelines']
+
+    if not isinstance(parsed, list) or not parsed:
+        return False, llm_structured_output
+
+    for item in parsed:
+        if not isinstance(item, dict):
+            return False, llm_structured_output
+
+        data = item.get("data", "")
+
+        # Reject trivial placeholders like "," or ""
+        if not isinstance(data, str) or len(data.strip()) < min_chars:
+            return False, llm_structured_output
+
+        lines = [ln for ln in data.splitlines() if ln.strip()]
+        if len(lines) < min_rows:
+            return False, llm_structured_output
+
+        # BSV heuristic: first non-empty line must contain | separators
+        header = lines[0]
+
+        # Reject if using tab separators (should be pipe-separated BSV)
+        if '\t' in header:
+            print(f"ERROR: Timeline data uses tab separators instead of pipe separators (BSV)")
+            print(f"Header: {repr(header[:100])}")
+            return False, llm_structured_output
+
+        cols = [c for c in header.split("|") if c.strip()]
+        if len(cols) < min_cols:
+            print(f"ERROR: Timeline data has too few columns (expected pipe-separated BSV)")
+            print(f"Found {len(cols)} columns: {cols}")
+            return False, llm_structured_output
+
+    # Passed all checks
+    return True, llm_structured_output
+
+def query_llm_for_joint_timelines(case_report: str, mention_table: pd.DataFrame, 
+                                candidates: List[Dict], admit_time: str, 
+                                discharge_time: str, base_url: str, template_path: Path, 
+                                endpoint_type: str = "openai",
+                                num_timelines: int = 1,
+                                max_case_report_chars: int = 30000,
+                                case_context_chars: int = 240) -> Dict:
+    """Use LLM to determine jointly plausible timelines."""
+    
+    # Read template file
+    try:
+        with open(template_path, 'r', encoding='utf-8') as f:
+            user_text = f.read()
+    except FileNotFoundError:
+        print(f"Template file {template_path} not found, using default template")
+        # Fallback to original template if file doesn't exist
+        user_text = """
+Case Report (with uid4 tags):
+{{case_report}}
+Current Mention Table:
+{{mentions_text}}
+Candidate Timestamps (score >= threshold):
+{{candidates_text}}
+Hospitalization Context:
+- Admission: {{admit_time}}
+- Discharge: {{discharge_time}}
+Provide 2-3 jointly plausible timelines where all timestamps are consistent.
+For each timeline, provide:
+- Updated mention table with new timestamps (in similar format with header)
+- Reasoning for the timeline's plausibility
+- Any tensions in timing given the evidence
+Output format:
+{{
+    "reasoning_summary": "overall clinical reasoning...",
+    "timelines": [
+        {{
+            "timeline_id": 1,
+            "data": "revised bsv table as a string",
+            "reasoning": "what makes this timeline plausible and complementary..."
+        }},
+        ...
+    ]
+}}
+"""
+    
+    # Format mentions text
+    mentions_text = mention_table
+    case_report = compact_case_report(
+        case_report,
+        mentions_text,
+        max_case_report_chars,
+        context_chars=case_context_chars,
+    )
+
+    # Format candidates
+    candidates_text = json.dumps(candidates, indent=2)
+
+    # Escape curly braces in all input text to prevent ChatPromptTemplate interpretation
+    # This must be done BEFORE replacing placeholders
+    case_report_escaped = case_report.replace('{', '{{').replace('}', '}}')
+    mentions_text_escaped = mentions_text.replace('{', '{{').replace('}', '}}')
+    candidates_text_escaped = candidates_text.replace('{', '{{').replace('}', '}}')
+    admit_time_escaped = admit_time.replace('{', '{{').replace('}', '}}')
+    discharge_time_escaped = discharge_time.replace('{', '{{').replace('}', '}}')
+
+    # Replace placeholders in template with escaped content
+    user_text = user_text.replace("{{case_report}}", case_report_escaped)
+    user_text = user_text.replace("{{mentions_text}}", mentions_text_escaped)
+    user_text = user_text.replace("{{candidates_text}}", candidates_text_escaped)
+    user_text = user_text.replace("{{admit_time}}", admit_time_escaped)
+    user_text = user_text.replace("{{discharge_time}}", discharge_time_escaped)
+    user_text = user_text.replace("{{num_timelines}}", str(max(1, int(num_timelines))))
+    
+    # if endpoint_type == "openai":
+    if True:
+        # For OpenAI chat completions, return structured message
+        messages = [
+            {"role": "system", "content": "You are a top-shelf clinician. Be concise. Return only the requested JSON. Do not skip any rows from the Current Mention Table."},
+            {"role": "user", "content": user_text}
+        ]
+        
+        # response = ''
+        # for wsi in range(10):
+        #     try:
+        #         response = query_openai_chat(messages, server_url=base_url)
+        #         if response.strip():
+        #             break
+        #     except:
+        #         print('Process error (ctx window?)')
+        #         response = ''
+        #         break
+        #     print(f'Whitespace output ({wsi}/10)')
+
+        llm = ChatOpenAI(
+            openai_api_base=f"{base_url}/v1",
+            openai_api_key="dummy",
+            model="/data/weissjc/.cache/vllm/Kimi-K2-Thinking/",
+            # temperature=0,
+            max_tokens=100000,
+        )   
+
+        STRUCTURED_SCHEMA = {
+            "title": "TimeSeriesResponse",
+            "description": "LLM output containing an short reasoning summary and one or more indexed timelines and per-timeline reasoning snippets.",
+            "type": "object",
+            "required": ["reasoning_summary", "timelines"],
+            "properties": {
+                "reasoning_summary": {"type": "string"},
+                "timelines": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["timeline_id", "data", "reasoning"],
+                    "properties": {
+                        "timeline_id": {"type": "string", "minLength": 1},
+                        "data": {"type": "string"},
+                        "reasoning": {"type": "string"}
+                    },
+                    "additionalProperties": False
+                }
+                }
+            },
+            "additionalProperties": False
+        }
+
+        try:
+            prompt = ChatPromptTemplate.from_messages(messages)
+        except (KeyError, ValueError) as e:
+            print(f"ERROR: ChatPromptTemplate parsing error: {e}")
+            print(f"       This usually means input data contains curly braces that look like template variables")
+            print(f"       Returning empty result for this case")
+            return {"timelines": [], "error": str(e)}
+
+        structured_llm = llm.with_structured_output(STRUCTURED_SCHEMA)
+        # return parse_or_repair_json(response, structured_llm, 0)
+        chain = prompt | structured_llm
+
+        result = chain.invoke({})
+        if type(result) is dict:
+            return result
+        if type(result) is AIMessage:
+            print('Pulling content from result')
+            result = result.content
+        return parse_or_repair_json(result, structured_llm, 0)  
+        # return parse_or_repair_json(response, llm, 0)        
+        # # Extract JSON from response
+        # if '```json' in response:
+        #     json_start = response.find('```json') + len('```json')
+        #     json_end = response.find('```', json_start)
+        #     if json_end != -1:
+        #         response = response[json_start:json_end].strip()
+        # elif '```' in response:
+        #     json_start = response.find('```') + len('```')
+        #     json_end = response.find('```', json_start)
+        #     if json_end != -1:
+        #         response = response[json_start:json_end].strip()
+        
+        # return json.loads(response)
+    else:  # completion endpoint
+        prompt = f"""You are a top-shelf, underrated clinician at the pinnacle of your ability. Be concise and comprehensive. Do not skip any rows.
+
+Case Report (with uid4 tags):
+{case_report}
+
+Current Mention Table:
+{mentions_text}
+
+Candidate Timestamps (score >= threshold):
+{json.dumps(candidates, indent=2)}
+
+Hospitalization Context:
+- Admission: {admit_time}
+- Discharge: {discharge_time}
+
+Provide 2-3 jointly plausible timelines where all timestamps are consistent.
+For each timeline, provide:
+- Updated mention table with new timestamps (in similar format with header)
+- Reasoning for the timeline's plausibility
+- Any tensions in timing given the evidence
+Output format:
+{{
+    "reasoning_summary": "overall clinical reasoning...",
+    "timelines": [
+        {{
+            "timeline_id": 1,
+            "data": "put revised bsv table here",
+            "reasoning": "what makes this timeline plausible and complementary..."
+        }},
+        ...
+    ]
+}}"""
+        
+        response = ''
+        for wsi in range(10):
+            try:
+                response = query_llama_cpp(prompt, server_url=f"{base_url}/completion", n_predict=200000,
+                                         extra_args = {
+                                             "repeat_penalty": 1.18, 
+                                             "repeat_last_n": 256,
+                                             "presence_penalty": 0.6
+                                         })
+                if response.strip():
+                    break
+            except:
+                print('Process error (ctx window?)')
+                response = ''
+                break
+            print(f'Whitespace output ({wsi}/10)')
+        
+        # # Extract JSON from response
+        # if '```json' in response:
+        #     json_start = response.find('```json') + len('```json')
+        #     json_end = response.find('```', json_start)
+        #     if json_end != -1:
+        #         response = response[json_start:json_end].strip()
+        # elif '```' in response:
+        #     json_start = response.find('```') + len('```')
+        #     json_end = response.find('```', json_start)
+        #     if json_end != -1:
+        #         response = response[json_start:json_end].strip()
+        
+        # return json.loads(response)
+
+        llm = ChatOpenAI(
+            openai_api_base=f"{base_url}/v1",
+            openai_api_key="dummy",
+            model="/data/weissjc/.cache/vllm/Kimi-K2-Thinking/",
+            temperature=0,
+            max_tokens=100000,
+        )   
+
+        STRUCTURED_SCHEMA = {
+            "title": "TimeSeriesResponse",
+            "description": "LLM output containing an overall reasoning summary and one or more named time series with tabular data and per-series reasoning.",
+            "type": "object",
+            "required": ["reasoning_summary", "time_series"],
+            "properties": {
+                "reasoning_summary": {"type": "string"},
+                "time_series": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "required": ["timeline_id", "data", "reasoning"],
+                    "properties": {
+                        "timeline_id": {"type": "string", "minLength": 1},
+                        "data": {"type": "string"},
+                        "reasoning": {"type": "string"}
+                    },
+                    "additionalProperties": False
+                }
+                }
+            },
+            "additionalProperties": False
+        }
+        prompt = ChatPromptTemplate.from_messages(messages)
+        
+        structured_llm = llm.with_structured_output(STRUCTURED_SCHEMA)
+        # return parse_or_repair_json(response, structured_llm, 0)  
+        chain = prompt | structured_llm 
+        result = chain.invoke({})
+        if result is Dict:
+            return result
+        if type(result) is AIMessage:
+            print('Pulling content from result')
+            result = result.content
+        return parse_or_repair_json(result, structured_llm, 0)   
+
+def log_failed_output(
+    case_file: str,
+    log_dir: str,
+    attempt: int,
+    raw_output: str,
+) -> None:
+    os.makedirs(log_dir, exist_ok=True)
+    basename= os.path.basename(case_file).replace(".*","")
+
+    ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    path = os.path.join(log_dir, f"{basename}_retry_{attempt}_{ts}.json")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(raw_output)
+
+def assign_joint_timelines(anchor_results_file: Path, case_report_file: Path, 
+                         mention_file: Path, output_file: Path, 
+                         log_dir: Path,
+                         tau: float,
+                         base_url: str, note_link_file: Path,
+                         max_total_candidates: float = 300,
+                         template_path: Path = Path("templates/ajt.txt"),
+                         top_k: int = 10,
+                         n_retries: int = 5,
+                         endpoint_type: str = "openai",
+                         num_timelines: int = 1,
+                         max_candidate_field_chars: int = 180,
+                         max_case_report_chars: int = 30000,
+                         case_context_chars: int = 240
+                         ) -> Dict:
+    """Process all inputs to generate jointly plausible timelines."""
+    # Load anchor results
+    anchor_df = pd.read_csv(anchor_results_file)
+    
+    # Read case report
+    case_report = read_case_report(case_report_file)
+    
+    # Read mention table
+    mention_table = read_mention_table(mention_file)
+    
+    # Extract note_id
+    note_id = extract_note_id_from_case_report_path(case_report_file)
+    
+    # Get hospitalization context
+    note_times = read_note_link_times(note_link_file, note_id)
+    
+    # Prepare candidates with top-k filtering per mention
+    candidates = prepare_candidates_data(
+        anchor_df,
+        tau,
+        max_total_candidates=max_total_candidates,
+        top_k=top_k,
+        max_field_chars=max_candidate_field_chars,
+    )
+    
+    # Query LLM for timelines
+    result = {}
+    result_passes = False
+    for i in range(n_retries):        
+        result = query_llm_for_joint_timelines(
+            case_report, mention_table, candidates, 
+            note_times.get('admittime', 'Unknown'),
+            note_times.get('dischtime', 'Unknown'),
+            base_url,
+            template_path,
+            endpoint_type,
+            num_timelines=num_timelines,
+            max_case_report_chars=max_case_report_chars,
+            case_context_chars=case_context_chars,
+        )
+
+        result_passes, _ = has_meaningful_content(result)
+        if result_passes:
+            break
+        
+        # Else retry
+        log_failed_output(case_report_file, log_dir, i+1, json.dumps(result))
+
+        print(f'LLM content did not pass checks, logged to {log_dir} ({str(i+1)}/{n_retries})')
+
+    if not result_passes:
+        raise RuntimeError(
+            f"LLM did not return a valid pipe-separated timeline table after {n_retries} attempts"
+        )
+
+    # if type(result) is not dict:
+    #     result = dict(result)
+    
+    # Add metadata
+    result['note_id'] = note_id
+    result['tau'] = tau
+    result['candidate_count'] = len(candidates)
+    
+    # Save to JSON file
+    with open(output_file, 'w') as f:
+        json.dump(result, f, indent=2)
+    return result
+
+def main():
+    parser = argparse.ArgumentParser(description="Generate jointly plausible timelines")
+    parser.add_argument("--anchor-results", required=True, help="Joined anchor-source CSV file")
+    parser.add_argument("--case-report", required=True, help="Case report text file")
+    parser.add_argument("--mention-table", required=True, help="Mention table .txt.gz file")
+    parser.add_argument("--output", required=True, help="Output JSON file path")
+    parser.add_argument("--log-dir", help="Log file path", default="log")
+    parser.add_argument("--tau", type=float, default=0.1, help="Score threshold")
+    parser.add_argument("--host", default="localhost", help="LLM server host")
+    parser.add_argument("--port", type=int, default=8080, help="LLM server port")
+    parser.add_argument("--max-total-candidates", type=int, default=300, help="How many candidates max to consider")
+    parser.add_argument("--top-k", type=int, default=10, help="Top K scores per mention to keep")
+    parser.add_argument("--num-timelines", type=int, default=1, help="Number of final timelines to request")
+    parser.add_argument("--max-candidate-field-chars", type=int, default=180, help="Maximum characters kept for each candidate anchor/event/value field")
+    parser.add_argument("--max-case-report-chars", type=int, default=30000, help="Maximum case-report context characters sent to the LLM; <=0 keeps full report")
+    parser.add_argument("--case-context-chars", type=int, default=240, help="Characters of case-report context kept around each uid4 tag")
+    parser.add_argument("--note-link", default="./data/note_link.csv.gz", help="Path to note_link.csv.gz")
+    parser.add_argument("--template", default="templates/ajt.txt", help="Path to template file")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output")
+    parser.add_argument("--endpoint-type", choices=["openai", "completion"], default="openai", 
+                       help="Which endpoint type to use: 'openai' for /v1/chat/completions or 'completion' for /completion (disabled for now)")
+    
+    args = parser.parse_args()
+    
+    anchor_results = Path(args.anchor_results)
+    case_report = Path(args.case_report)
+    mention_table = Path(args.mention_table)
+    output_file = Path(args.output)
+    log_dir = Path(args.log_dir)
+    template_path = Path(args.template)
+    max_total_candidates = args.max_total_candidates
+    
+    if not all([anchor_results.exists(), case_report.exists(), mention_table.exists()]):
+        print("Missing required input files")
+        return 2
+    
+    if output_file.exists() and not args.overwrite:
+        print("Output exists, use --overwrite to regenerate")
+        return 0
+        # pass
+    
+    result = assign_joint_timelines(
+        anchor_results, case_report, mention_table,
+        output_file,
+        log_dir,
+        args.tau,
+        f"http://{args.host}:{args.port}",
+        Path(args.note_link),
+        max_total_candidates,
+        template_path,
+        top_k=args.top_k,
+        endpoint_type=args.endpoint_type,
+        num_timelines=args.num_timelines,
+        max_candidate_field_chars=args.max_candidate_field_chars,
+        max_case_report_chars=args.max_case_report_chars,
+        case_context_chars=args.case_context_chars,
+    )
+
+    print(f"Generated {len(result.get('timelines', []))} timelines")
+    print(f"Saved to {output_file}")
+    return 0
+
+if __name__ == "__main__":
+    exit_code = 0
+    try:
+        exit_code = main() or 0
+    except Exception:
+        import traceback
+        traceback.print_exc()
+        exit_code = 1
+    finally:
+        # Ensure we always force exit, even if background client threads are alive.
+        import sys
+        sys.stdout.flush()
+        sys.stderr.flush()
+        import os
+        os._exit(exit_code)
