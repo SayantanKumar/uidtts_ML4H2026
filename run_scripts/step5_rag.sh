@@ -213,18 +213,46 @@ validate_step12_outputs() {
     local tagged_file
     local tag_file
     local base
+    local valid_pair_count=0
+    local skipped_pair_count=0
+    local valid_tag_count=0
+    local invalid_tag_count=0
 
     [[ "${#tagged_files[@]}" -gt 0 ]] || die "No tagged reports found in $TAGGED_DIR"
     [[ "${#tag_files[@]}" -gt 0 ]] || die "No tag tables found in $TAGS_DIR"
 
     for tagged_file in "${tagged_files[@]}"; do
-        has_nonblank_content "$tagged_file" || die "Tagged report is empty or invalid: $tagged_file"
+        if ! has_nonblank_content "$tagged_file"; then
+            log "WARNING: skipping invalid Step 1 tagged report for Step 5: $tagged_file"
+            skipped_pair_count=$((skipped_pair_count + 1))
+            continue
+        fi
         base="$(case_base "$tagged_file")"
-        tag_file="$(find_tag_file_for_base "$base")" || die "Missing tag table for $tagged_file"
-        has_nonblank_content "$tag_file" || die "Tag table is empty or invalid: $tag_file"
+        if ! tag_file="$(find_tag_file_for_base "$base")"; then
+            log "WARNING: skipping $base for Step 5; missing Step 2 tag table"
+            skipped_pair_count=$((skipped_pair_count + 1))
+            continue
+        fi
+        if ! has_nonblank_content "$tag_file"; then
+            log "WARNING: skipping $base for Step 5; Step 2 tag table is empty or invalid: $tag_file"
+            skipped_pair_count=$((skipped_pair_count + 1))
+            continue
+        fi
+        valid_pair_count=$((valid_pair_count + 1))
     done
 
-    log "Validated Step 1/2 outputs for Step 5"
+    for tag_file in "${tag_files[@]}"; do
+        if has_nonblank_content "$tag_file"; then
+            valid_tag_count=$((valid_tag_count + 1))
+        else
+            log "WARNING: invalid tag table will be ignored by Step 5: $tag_file"
+            invalid_tag_count=$((invalid_tag_count + 1))
+        fi
+    done
+
+    [[ "$valid_pair_count" -gt 0 ]] || die "No valid Step 1/2 tagged-report + tag-table pairs found for Step 5"
+
+    log "Validated Step 1/2 outputs for Step 5: $valid_pair_count valid pairs; skipped $skipped_pair_count invalid/missing pairs; $valid_tag_count non-empty tag tables; $invalid_tag_count invalid tag tables"
 }
 
 validate_tabular_inputs() {
@@ -249,28 +277,52 @@ stage_tagged_reports_as_gz() {
     local tagged_files=("$TAGGED_DIR"/*.txt "$TAGGED_DIR"/*.txt.gz)
     filter_selected_files_in_place tagged_files
     local tagged_file
+    local tag_file
     local base
     local dest
+    local valid_tags_dir="$SELECTION_WORK_DIR/step5_valid_tags_${SLURM_JOB_ID:-manual}_$$"
+    local staged_count=0
+    local skipped_count=0
 
-    mkdir -p "$STEP5_TAGGED_GZ_DIR"
+    rm -rf "$STEP5_TAGGED_GZ_DIR" "$valid_tags_dir"
+    mkdir -p "$STEP5_TAGGED_GZ_DIR" "$valid_tags_dir"
 
     for tagged_file in "${tagged_files[@]}"; do
         base="$(case_base "$tagged_file")"
         dest="$STEP5_TAGGED_GZ_DIR/${base}.txt.gz"
 
-        if has_nonblank_content "$dest"; then
-            log "Skipping staged tagged report for $base; already exists"
+        if ! has_nonblank_content "$tagged_file"; then
+            log "WARNING: Step 5A skipping $base; tagged report is empty or invalid"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+        if ! tag_file="$(find_tag_file_for_base "$base")"; then
+            log "WARNING: Step 5A skipping $base; missing tag table"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+        if ! has_nonblank_content "$tag_file"; then
+            log "WARNING: Step 5A skipping $base; tag table is empty or invalid: $tag_file"
+            skipped_count=$((skipped_count + 1))
             continue
         fi
 
-        if [[ "$tagged_file" == *.gz ]]; then
+        if has_nonblank_content "$dest"; then
+            log "Skipping staged tagged report for $base; already exists"
+        elif [[ "$tagged_file" == *.gz ]]; then
             cp -f "$tagged_file" "$dest"
         else
             gzip -c "$tagged_file" > "$dest"
         fi
+
+        ln -sfn "$tag_file" "$valid_tags_dir/$(basename "$tag_file")"
+        staged_count=$((staged_count + 1))
     done
 
-    log "Staged tagged reports for mask_cr_append_mt.py: $STEP5_TAGGED_GZ_DIR"
+    [[ "$staged_count" -gt 0 ]] || die "No valid Step 5A inputs after filtering Step 1/2 outputs"
+
+    STEP5_EFFECTIVE_TAGS_DIR="$valid_tags_dir"
+    log "Staged tagged reports for mask_cr_append_mt.py: $STEP5_TAGGED_GZ_DIR ($staged_count valid; $skipped_count skipped)"
 }
 
 cleanup_llm_server() {
@@ -301,8 +353,12 @@ find_mapping_file() {
     return 1
 }
 
-RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$RUN_SCRIPT_DIR/file_selection_utils.sh"
+SELECTION_UTILS="$PROJECT_DIR/run_scripts/file_selection_utils.sh"
+if [[ ! -f "$SELECTION_UTILS" ]]; then
+    RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SELECTION_UTILS="$RUN_SCRIPT_DIR/file_selection_utils.sh"
+fi
+source "$SELECTION_UTILS"
 
 find_line_level_file() {
     shopt -s nullglob
@@ -325,6 +381,29 @@ find_line_level_file() {
     return 1
 }
 
+subject_id_from_name() {
+    local raw_name="$1"
+    local base
+    local token
+
+    base="$(case_base "$raw_name")"
+
+    if [[ -e "$TABULAR_DIR/${base}.csv.gz" ]]; then
+        echo "$base"
+        return 0
+    fi
+
+    while IFS= read -r token; do
+        [[ -n "$token" ]] || continue
+        if [[ -e "$TABULAR_DIR/${token}.csv.gz" ]]; then
+            echo "$token"
+            return 0
+        fi
+    done < <(printf "%s\n" "$base" | grep -Eo '[0-9]{5,}' || true)
+
+    return 1
+}
+
 flatten_and_join_results() {
     shopt -s nullglob
 
@@ -339,18 +418,28 @@ flatten_and_join_results() {
     local line_level_file
     local joined_count=0
     local skipped_count=0
+    local failed_count=0
 
     [[ "${#result_files[@]}" -gt 0 ]] || die "No ranker result JSON files found in $COMPARISON_DIR"
 
     : > "$STEP5_JOIN_LOG"
 
     for results_file in "${result_files[@]}"; do
-        has_nonblank_content "$results_file" || die "Ranker result is empty: $results_file"
-
         base_name="$(basename "$results_file" _results.json)"
-        patient_id="${base_name%%-*}"
-        summary_csv="$COMPARISON_DIR/${base_name}_summary.csv"
-        joined_csv="$COMPARISON_DIR/${base_name}_joined.csv"
+
+        if ! has_nonblank_content "$results_file"; then
+            log "WARNING: skipping $base_name; ranker result is empty: $results_file" | tee -a "$STEP5_JOIN_LOG"
+            failed_count=$((failed_count + 1))
+            continue
+        fi
+
+        if ! patient_id="$(subject_id_from_name "$base_name")"; then
+            log "WARNING: skipping $base_name; could not resolve subject ID from filename" | tee -a "$STEP5_JOIN_LOG"
+            failed_count=$((failed_count + 1))
+            continue
+        fi
+        summary_csv="$COMPARISON_DIR/${patient_id}_summary.csv"
+        joined_csv="$COMPARISON_DIR/${patient_id}_joined.csv"
 
         if has_nonblank_content "$joined_csv"; then
             log "Skipping $base_name; joined CSV already exists" | tee -a "$STEP5_JOIN_LOG"
@@ -362,34 +451,60 @@ flatten_and_join_results() {
             log "Using existing score summary for $base_name" | tee -a "$STEP5_JOIN_LOG"
         else
             log "Flattening scores for $base_name" | tee -a "$STEP5_JOIN_LOG"
-            python "$VIEW_SCORES_SCRIPT" \
+            if ! python "$VIEW_SCORES_SCRIPT" \
                 --results-file "$results_file" \
                 --output "$summary_csv" \
                 --sort-by score \
                 --overwrite \
-                >> "$STEP5_JOIN_LOG" 2>&1
+                >> "$STEP5_JOIN_LOG" 2>&1; then
+                log "WARNING: skipping $base_name; score flattening failed" | tee -a "$STEP5_JOIN_LOG"
+                failed_count=$((failed_count + 1))
+                continue
+            fi
         fi
 
-        has_nonblank_content "$summary_csv" || die "Summary CSV is empty: $summary_csv"
+        if ! has_nonblank_content "$summary_csv"; then
+            log "WARNING: skipping $base_name; summary CSV is empty: $summary_csv" | tee -a "$STEP5_JOIN_LOG"
+            failed_count=$((failed_count + 1))
+            continue
+        fi
 
-        mapping_file="$(find_mapping_file "$patient_id")" || die "Missing summary_mapping.json for patient_id=$patient_id"
-        line_level_file="$(find_line_level_file "$patient_id")" || die "Missing tabular CSV for patient_id=$patient_id"
+        if ! mapping_file="$(find_mapping_file "$patient_id")"; then
+            log "WARNING: skipping $base_name; missing summary_mapping.json for patient_id=$patient_id" | tee -a "$STEP5_JOIN_LOG"
+            failed_count=$((failed_count + 1))
+            continue
+        fi
+        if ! line_level_file="$(find_line_level_file "$patient_id")"; then
+            log "WARNING: skipping $base_name; missing tabular CSV for patient_id=$patient_id" | tee -a "$STEP5_JOIN_LOG"
+            failed_count=$((failed_count + 1))
+            continue
+        fi
 
         log "Joining anchor matches back to source rows for $base_name" | tee -a "$STEP5_JOIN_LOG"
-        python "$JOIN_ANCHOR_SCRIPT" \
+        if ! python "$JOIN_ANCHOR_SCRIPT" \
             --anchor-results "$summary_csv" \
             --summary-mapping "$mapping_file" \
             --line-level-data "$line_level_file" \
             --output "$joined_csv" \
             --note-adms "$NOTE_LINK_PATH" \
             --overwrite \
-            >> "$STEP5_JOIN_LOG" 2>&1
+            >> "$STEP5_JOIN_LOG" 2>&1; then
+            log "WARNING: skipping $base_name; join_anchor_with_source_timed.py failed" | tee -a "$STEP5_JOIN_LOG"
+            failed_count=$((failed_count + 1))
+            continue
+        fi
 
-        has_nonblank_content "$joined_csv" || die "Joined CSV is empty: $joined_csv"
+        if ! has_nonblank_content "$joined_csv"; then
+            log "WARNING: skipping $base_name; joined CSV is empty: $joined_csv" | tee -a "$STEP5_JOIN_LOG"
+            failed_count=$((failed_count + 1))
+            continue
+        fi
         joined_count=$((joined_count + 1))
     done
 
-    log "Created $joined_count joined anchor-source CSV files; skipped $skipped_count existing joined CSV files"
+    [[ $((joined_count + skipped_count)) -gt 0 ]] || die "No valid joined anchor-source CSV files were created or found"
+
+    log "Created $joined_count joined anchor-source CSV files; skipped $skipped_count existing joined CSV files; failed $failed_count cases"
 }
 
 ###############################################################################
@@ -455,20 +570,15 @@ stage_tagged_reports_as_gz
 
 log "Step 5A: preparing UID-tagged reports with mask_cr_append_mt.py"
 
-EFFECTIVE_TAGS_DIR="$TAGS_DIR"
-if selection_enabled; then
-    stage_selected_files_for_bases \
-        "$SELECTION_WORK_DIR/step5_tags_${SLURM_JOB_ID:-manual}_$$" \
-        "$TAGS_DIR/{}_tags.bsv.gz" \
-        "$TAGS_DIR/{}_tags.bsv"
-    EFFECTIVE_TAGS_DIR="$STAGED_SELECTED_DIR"
-fi
+EFFECTIVE_TAGS_DIR="${STEP5_EFFECTIVE_TAGS_DIR:-$TAGS_DIR}"
 
-python "$MASK_SCRIPT" \
+if ! python "$MASK_SCRIPT" \
     --mention_table_dir "$EFFECTIVE_TAGS_DIR/" \
     --tagged_case_report_dir "$STEP5_TAGGED_GZ_DIR/" \
     --output_dir "$BUNDLE_DIR/" \
-    > "$STEP5_MASK_LOG" 2>&1
+    > "$STEP5_MASK_LOG" 2>&1; then
+    log "WARNING: Step 5A mask_cr_append_mt.py returned a nonzero status; continuing with any bundle reports that were produced"
+fi
 
 shopt -s nullglob
 bundle_reports=("$BUNDLE_DIR"/*.txt)
@@ -498,7 +608,7 @@ if selection_enabled; then
     ln -sfn "$RAG_OUTPUT_ROOT" "$EFFECTIVE_BUNDLE_DIR/tabular"
 fi
 
-python "$ANCHOR_QUERY_SCRIPT" generate \
+if ! python "$ANCHOR_QUERY_SCRIPT" generate \
     --folder "$EFFECTIVE_BUNDLE_DIR" \
     --host 127.0.0.1 \
     --port "$PORT" \
@@ -510,7 +620,9 @@ python "$ANCHOR_QUERY_SCRIPT" generate \
     --context-window-chars "$AQG_CONTEXT_WINDOW_CHARS" \
     --max-report-chars "$AQG_MAX_REPORT_CHARS" \
     --max-queries-per-uid "$AQG_MAX_QUERIES_PER_UID" \
-    > "$STEP5_AQG_LOG" 2>&1
+    > "$STEP5_AQG_LOG" 2>&1; then
+    log "WARNING: Step 5B anchor_query_generator.py returned a nonzero status; continuing with any anchor-query JSON files that were produced"
+fi
 
 cleanup_llm_server
 trap - EXIT
@@ -534,7 +646,7 @@ if selection_enabled; then
     EFFECTIVE_TABULAR_DIR="$STAGED_SELECTED_DIR"
 fi
 
-python "$RAG_PIPELINE_SCRIPT" \
+if ! python "$RAG_PIPELINE_SCRIPT" \
     --folder "$EFFECTIVE_TABULAR_DIR/" \
     --output-folder "$RAG_OUTPUT_ROOT/" \
     --infix "$RAG_INFIX" \
@@ -543,7 +655,9 @@ python "$RAG_PIPELINE_SCRIPT" \
     --embedding-batch-size "$EMBEDDING_BATCH_SIZE" \
     --max-length "$HF_MAX_LENGTH" \
     ingest \
-    > "$STEP5_RAG_LOG" 2>&1
+    > "$STEP5_RAG_LOG" 2>&1; then
+    log "WARNING: Step 5C RAG ingestion returned a nonzero status; continuing with any RAG outputs that were produced"
+fi
 
 rag_dirs=("$RAG_DIR"/*)
 [[ "${#rag_dirs[@]}" -gt 0 ]] || die "No RAG outputs found in $RAG_DIR"
@@ -551,7 +665,7 @@ log "Step 5C complete. RAG outputs found in $RAG_DIR"
 
 log "Step 5D: comparing anchor queries against RAG summaries with local HF models"
 
-python "$ANCHOR_RANKER_SCRIPT" compare \
+if ! python "$ANCHOR_RANKER_SCRIPT" compare \
     --folder "$EFFECTIVE_BUNDLE_DIR" \
     --anchor-subdir "$AQG_INFIX" \
     --rag-subdir "tabular/$RAG_INFIX/" \
@@ -562,7 +676,9 @@ python "$ANCHOR_RANKER_SCRIPT" compare \
     --embedding-batch-size "$EMBEDDING_BATCH_SIZE" \
     --reranker-batch-size "$RERANKER_BATCH_SIZE" \
     --max-length "$HF_MAX_LENGTH" \
-    > "$STEP5_RANK_LOG" 2>&1
+    > "$STEP5_RANK_LOG" 2>&1; then
+    log "WARNING: Step 5D anchor_match_ranker.py returned a nonzero status; continuing with any comparison results that were produced"
+fi
 
 result_jsons=("$COMPARISON_DIR"/*_results.json)
 filter_selected_files_in_place result_jsons

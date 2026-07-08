@@ -288,26 +288,96 @@ find_tag_file_for_base() {
     fi
 }
 
+numeric_tokens_from_name() {
+    printf "%s\n" "$1" | grep -Eo '[0-9]{5,}' || true
+}
+
+path_matches_subject_id() {
+    local file="$1"
+    local subject_id="$2"
+    local name
+    name="$(basename "$file")"
+    [[ "$name" =~ (^|[^0-9])${subject_id}([^0-9]|$) ]]
+}
+
+normalized_case_base() {
+    local base="$1"
+    if declare -F case_base >/dev/null 2>&1; then
+        case_base "$base"
+    elif declare -F strip_known_suffixes >/dev/null 2>&1; then
+        strip_known_suffixes "$base"
+    else
+        base="$(basename "$base")"
+        base="${base%.gz}"
+        base="${base%.txt}"
+        base="${base%.txt}"
+        base="${base%_modified}"
+        echo "$base"
+    fi
+}
+
 find_case_report() {
     local base="$1"
+    local cleaned
+    cleaned="$(normalized_case_base "$base")"
+
     local candidates=(
         "$BUNDLE_DIR/${base}.txt"
         "$BUNDLE_DIR/${base}.txt.txt"
         "$BUNDLE_DIR/${base}.txt.gz"
+        "$BUNDLE_DIR/${cleaned}.txt"
+        "$BUNDLE_DIR/${cleaned}.txt.txt"
+        "$BUNDLE_DIR/${cleaned}.txt.gz"
     )
+
     local file
     for file in "${candidates[@]}"; do
         [[ -e "$file" ]] && echo "$file" && return 0
     done
+
+    local token
+    while IFS= read -r token; do
+        [[ -n "$token" ]] || continue
+        for file in "$BUNDLE_DIR"/*"$token"*.txt "$BUNDLE_DIR"/*"$token"*.txt.txt "$BUNDLE_DIR"/*"$token"*.txt.gz; do
+            [[ -e "$file" ]] || continue
+            path_matches_subject_id "$file" "$token" || continue
+            echo "$file"
+            return 0
+        done
+    done < <(numeric_tokens_from_name "$cleaned")
+
     return 1
 }
 
 find_mention_table() {
     local base="$1"
-    local file="$TEMPORAL_ANSWERS_DIR/${base}_extracted.bsv.gz"
-    [[ -e "$file" ]] && echo "$file" && return 0
+    local cleaned
+    cleaned="$(normalized_case_base "$base")"
+
+    local candidates=(
+        "$TEMPORAL_ANSWERS_DIR/${base}_extracted.bsv.gz"
+        "$TEMPORAL_ANSWERS_DIR/${cleaned}_extracted.bsv.gz"
+    )
+
+    local file
+    for file in "${candidates[@]}"; do
+        [[ -e "$file" ]] && echo "$file" && return 0
+    done
+
+    local token
+    while IFS= read -r token; do
+        [[ -n "$token" ]] || continue
+        for file in "$TEMPORAL_ANSWERS_DIR"/*"$token"*"_extracted.bsv.gz"; do
+            [[ -e "$file" ]] || continue
+            path_matches_subject_id "$file" "$token" || continue
+            echo "$file"
+            return 0
+        done
+    done < <(numeric_tokens_from_name "$cleaned")
+
     return 1
 }
+
 
 find_mapping_file() {
     local patient_id="$1"
@@ -338,6 +408,29 @@ find_line_level_file() {
         echo "${matches[0]}"
         return 0
     fi
+    return 1
+}
+
+subject_id_from_name() {
+    local raw_name="$1"
+    local base
+    local token
+
+    base="$(case_base "$raw_name")"
+
+    if [[ -e "$TABULAR_DIR/${base}.csv.gz" ]]; then
+        echo "$base"
+        return 0
+    fi
+
+    while IFS= read -r token; do
+        [[ -n "$token" ]] || continue
+        if [[ -e "$TABULAR_DIR/${token}.csv.gz" ]]; then
+            echo "$token"
+            return 0
+        fi
+    done < <(printf "%s\n" "$base" | grep -Eo '[0-9]{5,}' || true)
+
     return 1
 }
 
@@ -426,8 +519,12 @@ select_bundle_pattern() {
     fi
 }
 
-RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$RUN_SCRIPT_DIR/file_selection_utils.sh"
+SELECTION_UTILS="$PROJECT_DIR/run_scripts/file_selection_utils.sh"
+if [[ ! -f "$SELECTION_UTILS" ]]; then
+    RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SELECTION_UTILS="$RUN_SCRIPT_DIR/file_selection_utils.sh"
+fi
+source "$SELECTION_UTILS"
 
 rename_unrevised_charpos_outputs() {
     local file
@@ -509,98 +606,99 @@ fi
 end_section
 
 ###############################################################################
-# Step 1
-###############################################################################
-
-start_section "step1_tag_clinical_mentions"
-input_ext="$(input_extension)"
-out_suffix="$(output_suffix)"
-input_files=("$EFFECTIVE_INPUT_DIR"/*"$input_ext")
-filter_selected_files_in_place input_files
-[[ "${#input_files[@]}" -gt 0 ]] || die "Step 1 prerequisite failed: no input files matching *$input_ext in $EFFECTIVE_INPUT_DIR"
-
-for input_file in "${input_files[@]}"; do
-    base="$(case_base "$input_file")"
-    tagged_out="$TAGGED_DIR/${base}${out_suffix}"
-    log "Step 1 running: $base"
-    case_start="$(epoch_now)"
-
-    if has_nonblank_content "$tagged_out"; then
-        log "Step 1 skip existing: $base"
-        SECTION_SKIPPED=$((SECTION_SKIPPED + 1))
-        continue
-    fi
-
-    case_list="$WORK_DIR/step1_${base}.case_list"
-    printf "%s\n" "$(basename "$input_file")" > "$case_list"
-
-    if run_logged "$STEP1_LOG" python "$PROMPT_IO_SCRIPT" \
-        --in_dir "$EFFECTIVE_INPUT_DIR" \
-        --input_type "$INPUT_TYPE" \
-        --case_list "$case_list" \
-        --out_dir "$TAGGED_DIR" \
-        --prompt_file "$TAG_PROMPT_FILE" \
-        --llm_mechanism llama.cpp \
-        --lcpp_url "http://127.0.0.1:${PORT}" \
-        --model_name "$INSTRUCT_MODEL_ALIAS" \
-        --endpoint_type openai \
-        --extra_body "$EXTRA_BODY" \
-        --max_input_lines "$STEP1_MAX_INPUT_LINES" \
-        --chunk_overlength \
-        --chunk_line_count "$STEP1_CHUNK_LINES" \
-        --out_extension "$OUT_EXTENSION" \
-        && has_nonblank_content "$tagged_out"; then
-        duration=$(( $(epoch_now) - case_start ))
-        log "Step 1 success: $base duration=$(format_duration "$duration")"
-        SECTION_SUCCESS=$((SECTION_SUCCESS + 1))
-    else
-        duration=$(( $(epoch_now) - case_start ))
-        log "Step 1 failed: $base duration=$(format_duration "$duration")"
-        record_failure "step1" "$base" "tagging_failed_or_empty_output" "$tagged_out"
-        SECTION_FAILED=$((SECTION_FAILED + 1))
-        [[ -e "$tagged_out" ]] && [[ ! -s "$tagged_out" ]] && rm -f "$tagged_out"
-    fi
-done
-end_section
-
-###############################################################################
-# Step 2
-###############################################################################
-
-start_section "step2_extract_uid_tags"
-tagged_files=("$TAGGED_DIR"/*.txt "$TAGGED_DIR"/*.txt.gz)
-filter_selected_files_in_place tagged_files
-[[ "${#tagged_files[@]}" -gt 0 ]] || die "Step 2 prerequisite failed: no tagged reports in $TAGGED_DIR"
-
-for tagged_file in "${tagged_files[@]}"; do
-    base="$(case_base "$tagged_file")"
-    tag_out="$TAGS_DIR/${base}_tags.bsv.gz"
-    log "Step 2 running: $base"
-    case_start="$(epoch_now)"
-
-    if has_nonblank_content "$tag_out"; then
-        log "Step 2 skip existing: $base"
-        SECTION_SKIPPED=$((SECTION_SKIPPED + 1))
-        continue
-    fi
-
-    if run_logged "$STEP2_LOG" python "$EXTRACT_TAGS_SCRIPT" \
-        --input "$tagged_file" \
-        --output-dir "$TAGS_DIR" \
-        && has_nonblank_content "$tag_out"; then
-        duration=$(( $(epoch_now) - case_start ))
-        log "Step 2 success: $base duration=$(format_duration "$duration")"
-        SECTION_SUCCESS=$((SECTION_SUCCESS + 1))
-    else
-        duration=$(( $(epoch_now) - case_start ))
-        log "Step 2 failed: $base duration=$(format_duration "$duration")"
-        record_failure "step2" "$base" "tag_extraction_failed_or_empty_output" "$tag_out"
-        SECTION_FAILED=$((SECTION_FAILED + 1))
-    fi
-done
-end_section
-
-###############################################################################
+# NOTE: Step 1/2 sections below are intentionally commented out; existing Step 1/2 outputs are used and execution resumes at Step 3.
+# # Step 1
+# ###############################################################################
+#
+# start_section "step1_tag_clinical_mentions"
+# input_ext="$(input_extension)"
+# out_suffix="$(output_suffix)"
+# input_files=("$EFFECTIVE_INPUT_DIR"/*"$input_ext")
+# filter_selected_files_in_place input_files
+# [[ "${#input_files[@]}" -gt 0 ]] || die "Step 1 prerequisite failed: no input files matching *$input_ext in $EFFECTIVE_INPUT_DIR"
+#
+# for input_file in "${input_files[@]}"; do
+#     base="$(case_base "$input_file")"
+#     tagged_out="$TAGGED_DIR/${base}${out_suffix}"
+#     log "Step 1 running: $base"
+#     case_start="$(epoch_now)"
+#
+#     if has_nonblank_content "$tagged_out"; then
+#         log "Step 1 skip existing: $base"
+#         SECTION_SKIPPED=$((SECTION_SKIPPED + 1))
+#         continue
+#     fi
+#
+#     case_list="$WORK_DIR/step1_${base}.case_list"
+#     printf "%s\n" "$(basename "$input_file")" > "$case_list"
+#
+#     if run_logged "$STEP1_LOG" python "$PROMPT_IO_SCRIPT" \
+#         --in_dir "$EFFECTIVE_INPUT_DIR" \
+#         --input_type "$INPUT_TYPE" \
+#         --case_list "$case_list" \
+#         --out_dir "$TAGGED_DIR" \
+#         --prompt_file "$TAG_PROMPT_FILE" \
+#         --llm_mechanism llama.cpp \
+#         --lcpp_url "http://127.0.0.1:${PORT}" \
+#         --model_name "$INSTRUCT_MODEL_ALIAS" \
+#         --endpoint_type openai \
+#         --extra_body "$EXTRA_BODY" \
+#         --max_input_lines "$STEP1_MAX_INPUT_LINES" \
+#         --chunk_overlength \
+#         --chunk_line_count "$STEP1_CHUNK_LINES" \
+#         --out_extension "$OUT_EXTENSION" \
+#         && has_nonblank_content "$tagged_out"; then
+#         duration=$(( $(epoch_now) - case_start ))
+#         log "Step 1 success: $base duration=$(format_duration "$duration")"
+#         SECTION_SUCCESS=$((SECTION_SUCCESS + 1))
+#     else
+#         duration=$(( $(epoch_now) - case_start ))
+#         log "Step 1 failed: $base duration=$(format_duration "$duration")"
+#         record_failure "step1" "$base" "tagging_failed_or_empty_output" "$tagged_out"
+#         SECTION_FAILED=$((SECTION_FAILED + 1))
+#         [[ -e "$tagged_out" ]] && [[ ! -s "$tagged_out" ]] && rm -f "$tagged_out"
+#     fi
+# done
+# end_section
+#
+# ###############################################################################
+# # Step 2
+# ###############################################################################
+#
+# start_section "step2_extract_uid_tags"
+# tagged_files=("$TAGGED_DIR"/*.txt "$TAGGED_DIR"/*.txt.gz)
+# filter_selected_files_in_place tagged_files
+# [[ "${#tagged_files[@]}" -gt 0 ]] || die "Step 2 prerequisite failed: no tagged reports in $TAGGED_DIR"
+#
+# for tagged_file in "${tagged_files[@]}"; do
+#     base="$(case_base "$tagged_file")"
+#     tag_out="$TAGS_DIR/${base}_tags.bsv.gz"
+#     log "Step 2 running: $base"
+#     case_start="$(epoch_now)"
+#
+#     if has_nonblank_content "$tag_out"; then
+#         log "Step 2 skip existing: $base"
+#         SECTION_SKIPPED=$((SECTION_SKIPPED + 1))
+#         continue
+#     fi
+#
+#     if run_logged "$STEP2_LOG" python "$EXTRACT_TAGS_SCRIPT" \
+#         --input "$tagged_file" \
+#         --output-dir "$TAGS_DIR" \
+#         && has_nonblank_content "$tag_out"; then
+#         duration=$(( $(epoch_now) - case_start ))
+#         log "Step 2 success: $base duration=$(format_duration "$duration")"
+#         SECTION_SUCCESS=$((SECTION_SUCCESS + 1))
+#     else
+#         duration=$(( $(epoch_now) - case_start ))
+#         log "Step 2 failed: $base duration=$(format_duration "$duration")"
+#         record_failure "step2" "$base" "tag_extraction_failed_or_empty_output" "$tag_out"
+#         SECTION_FAILED=$((SECTION_FAILED + 1))
+#     fi
+# done
+# end_section
+#
+# ###############################################################################
 # Step 3
 ###############################################################################
 
@@ -939,11 +1037,20 @@ for results_file in "${result_jsons[@]}"; do
     }
 
     base="$(basename "$results_file" _results.json)"
-    patient_id="${base%%-*}"
-    summary_csv="$COMPARISON_DIR/${base}_summary.csv"
-    joined_csv="$COMPARISON_DIR/${base}_joined.csv"
+    patient_id="$(subject_id_from_name "$base" || true)"
     log "Step 5E running: $base"
     case_start="$(epoch_now)"
+
+    if [[ -z "$patient_id" ]]; then
+        duration=$(( $(epoch_now) - case_start ))
+        log "Step 5E failed: could not resolve subject ID for $base duration=$(format_duration "$duration")"
+        record_failure "step5e" "$base" "could_not_resolve_subject_id_from_filename" "$results_file"
+        SECTION_FAILED=$((SECTION_FAILED + 1))
+        continue
+    fi
+
+    summary_csv="$COMPARISON_DIR/${patient_id}_summary.csv"
+    joined_csv="$COMPARISON_DIR/${patient_id}_joined.csv"
 
     if has_nonblank_content "$joined_csv"; then
         log "Step 5E skip existing: $base"

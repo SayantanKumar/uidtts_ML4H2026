@@ -138,8 +138,12 @@ cleanup_server() {
     fi
 }
 
-RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$RUN_SCRIPT_DIR/file_selection_utils.sh"
+SELECTION_UTILS="$PROJECT_DIR/run_scripts/file_selection_utils.sh"
+if [[ ! -f "$SELECTION_UTILS" ]]; then
+    RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SELECTION_UTILS="$RUN_SCRIPT_DIR/file_selection_utils.sh"
+fi
+source "$SELECTION_UTILS"
 
 ###############################################################################
 # Preflight
@@ -192,7 +196,7 @@ trap cleanup_server EXIT
 
 log "Step 1: tagging clinical mentions with prompt_io.py"
 
-python "$PROMPT_IO_SCRIPT" \
+if ! python "$PROMPT_IO_SCRIPT" \
     --in_dir "$EFFECTIVE_INPUT_DIR" \
     --input_type "$INPUT_TYPE" \
     --out_dir "$TAGGED_DIR" \
@@ -206,7 +210,9 @@ python "$PROMPT_IO_SCRIPT" \
     --chunk_overlength \
     --chunk_line_count "$STEP1_CHUNK_LINES" \
     --out_extension "$OUT_EXTENSION" \
-    > "$STEP1_LOG" 2>&1
+    > "$STEP1_LOG" 2>&1; then
+    log "WARNING: Step 1 prompt_io.py returned a nonzero status; continuing with any tagged reports that were produced"
+fi
 
 log "Step 1 complete. Tagged reports: $TAGGED_DIR"
 
@@ -232,10 +238,12 @@ if selection_enabled; then
     EFFECTIVE_TAGGED_DIR="$STAGED_SELECTED_DIR"
 fi
 
-python "$EXTRACT_TAGS_SCRIPT" \
+if ! python "$EXTRACT_TAGS_SCRIPT" \
     --input-dir "$EFFECTIVE_TAGGED_DIR" \
     --output-dir "$TAGS_DIR" \
-    > "$STEP2_LOG" 2>&1
+    > "$STEP2_LOG" 2>&1; then
+    log "WARNING: Step 2 extract_tagged_table.py returned a nonzero status; continuing with any tag tables that were produced"
+fi
 
 log "Step 2 complete. UID tag tables: $TAGS_DIR"
 

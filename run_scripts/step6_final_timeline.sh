@@ -130,8 +130,12 @@ has_nonblank_content() {
     fi
 }
 
-RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$RUN_SCRIPT_DIR/file_selection_utils.sh"
+SELECTION_UTILS="$PROJECT_DIR/run_scripts/file_selection_utils.sh"
+if [[ ! -f "$SELECTION_UTILS" ]]; then
+    RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SELECTION_UTILS="$RUN_SCRIPT_DIR/file_selection_utils.sh"
+fi
+source "$SELECTION_UTILS"
 
 strip_known_suffixes() {
     local name="$1"
@@ -141,10 +145,38 @@ strip_known_suffixes() {
     echo "$name"
 }
 
+numeric_tokens_from_name() {
+    printf "%s\n" "$1" | grep -Eo '[0-9]{5,}' || true
+}
+
+path_matches_subject_id() {
+    local file="$1"
+    local subject_id="$2"
+    local name
+    name="$(basename "$file")"
+    [[ "$name" =~ (^|[^0-9])${subject_id}([^0-9]|$) ]]
+}
+
+normalized_case_base() {
+    local base="$1"
+    if declare -F case_base >/dev/null 2>&1; then
+        case_base "$base"
+    elif declare -F strip_known_suffixes >/dev/null 2>&1; then
+        strip_known_suffixes "$base"
+    else
+        base="$(basename "$base")"
+        base="${base%.gz}"
+        base="${base%.txt}"
+        base="${base%.txt}"
+        base="${base%_modified}"
+        echo "$base"
+    fi
+}
+
 find_case_report() {
     local base="$1"
     local cleaned
-    cleaned="$(strip_known_suffixes "$base")"
+    cleaned="$(normalized_case_base "$base")"
 
     local candidates=(
         "$BUNDLE_DIR/${base}.txt"
@@ -157,11 +189,19 @@ find_case_report() {
 
     local file
     for file in "${candidates[@]}"; do
-        if [[ -e "$file" ]]; then
+        [[ -e "$file" ]] && echo "$file" && return 0
+    done
+
+    local token
+    while IFS= read -r token; do
+        [[ -n "$token" ]] || continue
+        for file in "$BUNDLE_DIR"/*"$token"*.txt "$BUNDLE_DIR"/*"$token"*.txt.txt "$BUNDLE_DIR"/*"$token"*.txt.gz; do
+            [[ -e "$file" ]] || continue
+            path_matches_subject_id "$file" "$token" || continue
             echo "$file"
             return 0
-        fi
-    done
+        done
+    done < <(numeric_tokens_from_name "$cleaned")
 
     return 1
 }
@@ -169,7 +209,7 @@ find_case_report() {
 find_mention_table() {
     local base="$1"
     local cleaned
-    cleaned="$(strip_known_suffixes "$base")"
+    cleaned="$(normalized_case_base "$base")"
 
     local candidates=(
         "$TEMPORAL_ANSWERS_DIR/${base}_extracted.bsv.gz"
@@ -178,14 +218,23 @@ find_mention_table() {
 
     local file
     for file in "${candidates[@]}"; do
-        if [[ -e "$file" ]]; then
+        [[ -e "$file" ]] && echo "$file" && return 0
+    done
+
+    local token
+    while IFS= read -r token; do
+        [[ -n "$token" ]] || continue
+        for file in "$TEMPORAL_ANSWERS_DIR"/*"$token"*"_extracted.bsv.gz"; do
+            [[ -e "$file" ]] || continue
+            path_matches_subject_id "$file" "$token" || continue
             echo "$file"
             return 0
-        fi
-    done
+        done
+    done < <(numeric_tokens_from_name "$cleaned")
 
     return 1
 }
+
 
 validate_step5_and_step4_inputs() {
     shopt -s nullglob
@@ -197,23 +246,45 @@ validate_step5_and_step4_inputs() {
     local case_report
     local mention_table
     local count=0
+    local skipped_count=0
 
     [[ "${#joined_files[@]}" -gt 0 ]] || die "No Step 5 joined CSV files found in $COMPARISON_DIR"
 
     for joined_file in "${joined_files[@]}"; do
-        has_nonblank_content "$joined_file" || die "Joined CSV is empty: $joined_file"
-
         base="$(basename "$joined_file" _joined.csv)"
-        case_report="$(find_case_report "$base")" || die "Missing bundle case report for $base"
-        mention_table="$(find_mention_table "$base")" || die "Missing Step 4 mention table for $base"
 
-        has_nonblank_content "$case_report" || die "Bundle case report is empty: $case_report"
-        has_nonblank_content "$mention_table" || die "Mention table is empty: $mention_table"
+        if ! has_nonblank_content "$joined_file"; then
+            log "WARNING: Step 6 skipping $base; joined CSV is empty: $joined_file"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+        if ! case_report="$(find_case_report "$base")"; then
+            log "WARNING: Step 6 skipping $base; missing bundle case report"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+        if ! mention_table="$(find_mention_table "$base")"; then
+            log "WARNING: Step 6 skipping $base; missing Step 4 mention table"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+        if ! has_nonblank_content "$case_report"; then
+            log "WARNING: Step 6 skipping $base; bundle case report is empty: $case_report"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+        if ! has_nonblank_content "$mention_table"; then
+            log "WARNING: Step 6 skipping $base; mention table is empty: $mention_table"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
 
         count=$((count + 1))
     done
 
-    log "Validated Step 6 inputs for $count cases"
+    [[ "$count" -gt 0 ]] || die "No valid Step 6 inputs after checking Step 5 joined CSVs, bundle reports, and Step 4 mention tables"
+
+    log "Validated Step 6 inputs for $count cases; skipped $skipped_count invalid/missing cases"
 }
 
 cleanup_server() {
@@ -276,16 +347,48 @@ shopt -s nullglob
 joined_files=("$COMPARISON_DIR"/*_joined.csv)
 filter_selected_files_in_place joined_files
 timeline_count=0
+failed_timeline_count=0
+STEP6_FAILED_CASES="$LLAMA_LOG_DIR/step6_failed_cases.txt"
+: > "$STEP6_FAILED_CASES"
 
 for joined_file in "${joined_files[@]}"; do
     base="$(basename "$joined_file" _joined.csv)"
-    case_report="$(find_case_report "$base")"
-    mention_table="$(find_mention_table "$base")"
     timeline_json="$COMPARISON_DIR/${base}_timelines.json"
+
+    if ! has_nonblank_content "$joined_file"; then
+        log "WARNING: joined CSV is empty for $base; continuing" | tee -a "$STEP6_LOG"
+        echo "$base|empty_joined_csv|$timeline_json" >> "$STEP6_FAILED_CASES"
+        failed_timeline_count=$((failed_timeline_count + 1))
+        continue
+    fi
+    if ! case_report="$(find_case_report "$base")"; then
+        log "WARNING: missing bundle case report for $base; continuing" | tee -a "$STEP6_LOG"
+        echo "$base|missing_case_report|$timeline_json" >> "$STEP6_FAILED_CASES"
+        failed_timeline_count=$((failed_timeline_count + 1))
+        continue
+    fi
+    if ! mention_table="$(find_mention_table "$base")"; then
+        log "WARNING: missing Step 4 mention table for $base; continuing" | tee -a "$STEP6_LOG"
+        echo "$base|missing_mention_table|$timeline_json" >> "$STEP6_FAILED_CASES"
+        failed_timeline_count=$((failed_timeline_count + 1))
+        continue
+    fi
+    if ! has_nonblank_content "$case_report"; then
+        log "WARNING: bundle case report is empty for $base; continuing" | tee -a "$STEP6_LOG"
+        echo "$base|empty_case_report|$timeline_json" >> "$STEP6_FAILED_CASES"
+        failed_timeline_count=$((failed_timeline_count + 1))
+        continue
+    fi
+    if ! has_nonblank_content "$mention_table"; then
+        log "WARNING: mention table is empty for $base; continuing" | tee -a "$STEP6_LOG"
+        echo "$base|empty_mention_table|$timeline_json" >> "$STEP6_FAILED_CASES"
+        failed_timeline_count=$((failed_timeline_count + 1))
+        continue
+    fi
 
     log "Assigning final timestamps for $base" | tee -a "$STEP6_LOG"
 
-    python "$ASSIGN_TIMESTAMPS_SCRIPT" \
+    if ! python "$ASSIGN_TIMESTAMPS_SCRIPT" \
         --anchor-results "$joined_file" \
         --case-report "$case_report" \
         --mention-table "$mention_table" \
@@ -298,16 +401,31 @@ for joined_file in "${joined_files[@]}"; do
         --note-link "$NOTE_LINK_PATH" \
         --endpoint-type openai \
         --overwrite \
-        >> "$STEP6_LOG" 2>&1
+        >> "$STEP6_LOG" 2>&1; then
+        log "WARNING: assign_joint_timestamps.py failed for $base; continuing" | tee -a "$STEP6_LOG"
+        echo "$base|python_failed|$timeline_json" >> "$STEP6_FAILED_CASES"
+        failed_timeline_count=$((failed_timeline_count + 1))
+        continue
+    fi
 
-    has_nonblank_content "$timeline_json" || die "Timeline JSON is empty: $timeline_json"
+    if ! has_nonblank_content "$timeline_json"; then
+        log "WARNING: timeline JSON is empty for $base; continuing" | tee -a "$STEP6_LOG"
+        echo "$base|empty_timeline_json|$timeline_json" >> "$STEP6_FAILED_CASES"
+        failed_timeline_count=$((failed_timeline_count + 1))
+        continue
+    fi
     timeline_count=$((timeline_count + 1))
 done
 
 cleanup_server
 trap - EXIT
 
-log "Step 6 complete. Created $timeline_count timeline JSON files"
+[[ "$timeline_count" -gt 0 ]] || die "No timeline JSON files were created successfully"
+
+log "Step 6 complete. Created $timeline_count timeline JSON files; failed $failed_timeline_count cases"
+if [[ "$failed_timeline_count" -gt 0 ]]; then
+    log "Step 6 failed-case list: $STEP6_FAILED_CASES"
+fi
 
 ###############################################################################
 # Summary

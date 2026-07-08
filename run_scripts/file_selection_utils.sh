@@ -28,6 +28,40 @@ selection_case_base() {
     echo "$name"
 }
 
+selection_numeric_tokens() {
+    printf "%s\n" "$1" | grep -Eo '[0-9]{5,}' || true
+}
+
+selection_match_candidates() {
+    local base="$1"
+    local token
+
+    echo "$base"
+    while IFS= read -r token; do
+        [[ -n "$token" ]] && echo "$token"
+    done < <(selection_numeric_tokens "$base")
+}
+
+selection_bases_match() {
+    local observed="$1"
+    local selected="$2"
+    local token
+
+    [[ "$observed" == "$selected" ]] && return 0
+
+    while IFS= read -r token; do
+        [[ -n "$token" ]] || continue
+        [[ "$selected" == "$token" ]] && return 0
+    done < <(selection_numeric_tokens "$observed")
+
+    while IFS= read -r token; do
+        [[ -n "$token" ]] || continue
+        [[ "$observed" == "$token" ]] && return 0
+    done < <(selection_numeric_tokens "$selected")
+
+    return 1
+}
+
 init_file_selection() {
     FILE_SELECTION_MODE="${FILE_SELECTION_MODE:-all}"
     SELECTED_CASE_BASES=()
@@ -66,7 +100,7 @@ is_selected_base() {
 
     local selected
     for selected in "${SELECTED_CASE_BASES[@]}"; do
-        [[ "$base" == "$selected" ]] && return 0
+        selection_bases_match "$base" "$selected" && return 0
     done
 
     return 1
@@ -145,8 +179,12 @@ stage_selected_files_for_bases() {
     fi
 
     local base
+    local candidate
     local template
     local src
+    local prefix
+    local suffix
+    local matches
     local found
     for base in "${SELECTED_CASE_BASES[@]}"; do
         found=0
@@ -157,6 +195,24 @@ stage_selected_files_for_bases() {
                 found=1
                 break
             fi
+
+            prefix="${template%%\{\}*}"
+            suffix="${template#*\{\}}"
+            while IFS= read -r candidate; do
+                [[ -n "$candidate" ]] || continue
+                matches=("${prefix}"*"${candidate}"*"${suffix}")
+                for src in "${matches[@]}"; do
+                    [[ -e "$src" ]] || continue
+                    if is_selected_base "$(selection_case_base "$src")"; then
+                        ln -sfn "$src" "$STAGED_SELECTED_DIR/$(basename "$src")"
+                        found=1
+                        break
+                    fi
+                done
+                [[ "$found" -eq 1 ]] && break
+            done < <(selection_match_candidates "$base")
+
+            [[ "$found" -eq 1 ]] && break
         done
 
         [[ "$found" -eq 1 ]] || die "Could not find selected case '$base' using expected file patterns"
