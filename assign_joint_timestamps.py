@@ -30,6 +30,9 @@ from call_lcpp import query_llama_cpp  # Import the function from call_lcpp.py
 
 FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
 MENTION_TABLE_RE = re.compile(r"\n\s*Mention table:\s*\n", re.IGNORECASE)
+MODEL_SPECIAL_TOKEN_RE = re.compile(r"<\|[^>]+?\|>")
+HARMONY_FINAL_MARKER = "<|channel|>final<|message|>"
+HARMONY_MESSAGE_MARKER = "<|message|>"
 
 def read_case_report(case_report_file: Path) -> str:
     """Read the case report text from file, handling both .txt and .txt.gz files."""
@@ -55,6 +58,35 @@ def extract_note_id_from_case_report_path(case_report_file: Path) -> str:
     else:
         return filename.split('.')[0]
 
+def candidate_ids_from_name(name: str) -> List[str]:
+    """Return possible note/subject IDs from a bare or decorated filename."""
+    base_name = Path(str(name)).name
+    for suffix in (
+        '.csv.gz', '.json.gz', '.txt.gz', '.bsv.gz',
+        '.csv', '.json', '.txt', '.bsv',
+    ):
+        if base_name.endswith(suffix):
+            base_name = base_name[:-len(suffix)]
+
+    for suffix in ('_summary', '_results', '_joined', '_timelines', '_extracted', '_tags'):
+        if base_name.endswith(suffix):
+            base_name = base_name[:-len(suffix)]
+
+    candidates = []
+
+    def add(value: str) -> None:
+        value = value.strip()
+        if value and value not in candidates:
+            candidates.append(value)
+
+    add(base_name)
+    if base_name.endswith('.txt'):
+        add(base_name[:-4])
+    for token in re.findall(r"(?<!\d)\d{5,}(?!\d)", base_name):
+        add(token)
+
+    return candidates
+
 def convert_timestamp_to_datetime(timestamp_int: int) -> str:
     """Convert integer timestamp (Unix time) to formatted datetime string in UTC."""
     try:
@@ -71,24 +103,29 @@ def read_note_link_times(note_link_file: Path, note_id: str) -> Dict[str, str]:
         df = pd.read_csv(
             note_link_file,
             compression='gzip' if note_link_file.suffix == '.gz' else None,
-            dtype={'note_id': str, 'hadm_id': str},
+            dtype={'note_id': str, 'hadm_id': str, 'subject_id': str},
         )
         if 'note_id' not in df.columns:
             print(f"Error reading note_link: missing note_id column in {note_link_file}")
             return {}
 
-        df['note_id'] = df['note_id'].astype(str)
-        lookup_note_id = str(note_id).replace('.txt', '')
+        for column in ('note_id', 'hadm_id', 'subject_id'):
+            if column in df.columns:
+                df[column] = df[column].astype(str)
 
-        matching_row = df[df['note_id'] == lookup_note_id]
-        if matching_row.empty:
-            matching_row = df[df['note_id'].str.startswith(f"{lookup_note_id}-")]
+        for lookup_note_id in candidate_ids_from_name(note_id):
+            matching_row = df[df['note_id'] == lookup_note_id]
+            if matching_row.empty and 'subject_id' in df.columns:
+                matching_row = df[df['subject_id'] == lookup_note_id]
             if matching_row.empty:
-                return {}
-        return {
-            'admittime': matching_row.iloc[0]['admittime'],
-            'dischtime': matching_row.iloc[0]['dischtime']
-        }
+                matching_row = df[df['note_id'].str.startswith(f"{lookup_note_id}-")]
+            if not matching_row.empty:
+                return {
+                    'admittime': matching_row.iloc[0]['admittime'],
+                    'dischtime': matching_row.iloc[0]['dischtime']
+                }
+
+        return {}
     except Exception as e:
         print(f"Error reading note_link: {e}")
         return {}
@@ -216,8 +253,63 @@ def strip_code_fences(text: str) -> str:
     m = FENCE_RE.search(text)
     return m.group(1).strip() if m else text
 
+def extract_balanced_json_object(text: str) -> str:
+    """Extract the first balanced JSON object from a model response."""
+    start = text.find("{")
+    if start < 0:
+        return text.strip()
+
+    depth = 0
+    in_string = False
+    escape = False
+
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:idx + 1].strip()
+
+    last = text.rfind("}")
+    if last > start:
+        return text[start:last + 1].strip()
+    return text[start:].strip()
+
+def clean_model_json_text(result: Any) -> str:
+    """Strip wrappers commonly emitted by local OpenAI-compatible models."""
+    if isinstance(result, AIMessage):
+        result = result.content
+
+    text = str(result).strip()
+
+    # GPT-OSS/Harmony-style responses can wrap the final answer in channel tokens.
+    if HARMONY_FINAL_MARKER in text:
+        text = text.rsplit(HARMONY_FINAL_MARKER, 1)[-1]
+    elif HARMONY_MESSAGE_MARKER in text:
+        text = text.rsplit(HARMONY_MESSAGE_MARKER, 1)[-1]
+
+    text = MODEL_SPECIAL_TOKEN_RE.sub("", text).strip()
+    text = strip_code_fences(text)
+    if text.lower().startswith("json\n"):
+        text = text.split("\n", 1)[1].strip()
+
+    return extract_balanced_json_object(text)
+
 def parse_or_repair_json(result: str, llm, attempt: int):
-    text = strip_code_fences(result)
+    text = clean_model_json_text(result)
 
     try:
         return json.loads(text)
@@ -249,9 +341,8 @@ def parse_or_repair_json(result: str, llm, attempt: int):
         ("user", "Fix this so it is valid JSON.\nReturn ONLY JSON.\n\n{bad_json}"),
     ])
 
-    # repair_chain = repair_grounding | llm | StrOutputParser()
-    repair_chain = repair_grounding | llm
-    repair_result = strip_code_fences(repair_chain.invoke({"bad_json": text}).content)
+    repair_chain = repair_grounding | llm | StrOutputParser()
+    repair_result = clean_model_json_text(repair_chain.invoke({"bad_json": text}))
 
     return json.loads(repair_result)
 
@@ -411,31 +502,15 @@ Output format:
             # temperature=0,
             max_tokens=100000,
         )   
-
-        STRUCTURED_SCHEMA = {
-            "title": "TimeSeriesResponse",
-            "description": "LLM output containing an short reasoning summary and one or more indexed timelines and per-timeline reasoning snippets.",
-            "type": "object",
-            "required": ["reasoning_summary", "timelines"],
-            "properties": {
-                "reasoning_summary": {"type": "string"},
-                "timelines": {
-                "type": "array",
-                "minItems": 1,
-                "items": {
-                    "type": "object",
-                    "required": ["timeline_id", "data", "reasoning"],
-                    "properties": {
-                        "timeline_id": {"type": "string", "minLength": 1},
-                        "data": {"type": "string"},
-                        "reasoning": {"type": "string"}
-                    },
-                    "additionalProperties": False
-                }
-                }
-            },
-            "additionalProperties": False
-        }
+        messages.append({
+            "role": "user",
+            "content": (
+                "Return ONLY one valid JSON object. Do not include markdown fences, "
+                "prose, analysis outside the JSON, or model-specific channel markers. "
+                "The JSON must contain keys 'reasoning_summary' and 'timelines'. "
+                "Each timeline must contain 'timeline_id', 'data', and 'reasoning'."
+            )
+        })
 
         try:
             prompt = ChatPromptTemplate.from_messages(messages)
@@ -445,17 +520,19 @@ Output format:
             print(f"       Returning empty result for this case")
             return {"timelines": [], "error": str(e)}
 
-        structured_llm = llm.with_structured_output(STRUCTURED_SCHEMA)
-        # return parse_or_repair_json(response, structured_llm, 0)
-        chain = prompt | structured_llm
+        chain = prompt | llm | StrOutputParser()
 
-        result = chain.invoke({})
-        if type(result) is dict:
-            return result
-        if type(result) is AIMessage:
-            print('Pulling content from result')
-            result = result.content
-        return parse_or_repair_json(result, structured_llm, 0)  
+        result_text = ""
+        try:
+            result_text = chain.invoke({})
+            return parse_or_repair_json(result_text, llm, 0)
+        except Exception as e:
+            print(f"ERROR: LLM response could not be parsed as timeline JSON: {e}")
+            return {
+                "timelines": [],
+                "error": str(e),
+                "raw_response_excerpt": str(result_text)[:4000],
+            }
         # return parse_or_repair_json(response, llm, 0)        
         # # Extract JSON from response
         # if '```json' in response:

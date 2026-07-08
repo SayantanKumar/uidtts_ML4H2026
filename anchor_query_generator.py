@@ -33,6 +33,9 @@ import re
 
 FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.IGNORECASE | re.DOTALL)
 MENTION_TABLE_RE = re.compile(r"\n\s*Mention table:\s*\n", re.IGNORECASE)
+MODEL_SPECIAL_TOKEN_RE = re.compile(r"<\|[^>]+?\|>")
+HARMONY_FINAL_MARKER = "<|channel|>final<|message|>"
+HARMONY_MESSAGE_MARKER = "<|message|>"
 
 # ------------------------------------------------------------------
 # Helper functions
@@ -57,8 +60,63 @@ def strip_code_fences(text: str) -> str:
     m = FENCE_RE.search(text)
     return m.group(1).strip() if m else text
 
+def extract_balanced_json_object(text: str) -> str:
+    """Extract the first balanced JSON object from a model response."""
+    start = text.find("{")
+    if start < 0:
+        return text.strip()
+
+    depth = 0
+    in_string = False
+    escape = False
+
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:idx + 1].strip()
+
+    last = text.rfind("}")
+    if last > start:
+        return text[start:last + 1].strip()
+    return text[start:].strip()
+
+def clean_model_json_text(result: Any) -> str:
+    """Strip wrappers commonly emitted by local OpenAI-compatible models."""
+    if isinstance(result, AIMessage):
+        result = result.content
+
+    text = str(result).strip()
+
+    # GPT-OSS/Harmony-style responses can wrap the final answer in channel tokens.
+    if HARMONY_FINAL_MARKER in text:
+        text = text.rsplit(HARMONY_FINAL_MARKER, 1)[-1]
+    elif HARMONY_MESSAGE_MARKER in text:
+        text = text.rsplit(HARMONY_MESSAGE_MARKER, 1)[-1]
+
+    text = MODEL_SPECIAL_TOKEN_RE.sub("", text).strip()
+    text = strip_code_fences(text)
+    if text.lower().startswith("json\n"):
+        text = text.split("\n", 1)[1].strip()
+
+    return extract_balanced_json_object(text)
+
 def parse_or_repair_json(result: str, llm, attempt: int):
-    text = strip_code_fences(result)
+    text = clean_model_json_text(result)
 
     try:
         return json.loads(text)
@@ -92,9 +150,8 @@ def parse_or_repair_json(result: str, llm, attempt: int):
         ("user", "Fix this so it is valid JSON. Return ONLY the repaired JSON, no explanations.\n\n{bad_json}"),
     ])
 
-    # repair_chain = repair_grounding | llm | StrOutputParser()
-    repair_chain = repair_grounding | llm
-    repair_result = strip_code_fences(repair_chain.invoke({"bad_json": text}).content)
+    repair_chain = repair_grounding | llm | StrOutputParser()
+    repair_result = clean_model_json_text(repair_chain.invoke({"bad_json": text}))
 
     return json.loads(repair_result)
 
@@ -382,27 +439,20 @@ def generate_anchor_queries(case_report_text: str,
         max_tokens=32768,  # 32K tokens for long discharge summaries in large cohort
     )
 
-    CLAIM_EVIDENCE_SCHEMA = {
-        "name": "claim_evidence_map",
-        "schema": {
-            "type": "object",
-            "additionalProperties": {
-            "type": "array",
-            "items": {"type": "string"}
-            }
-        },
-        "strict": False  # Changed from True to allow partial JSON on truncation
-    }
-    structured_llm = llm.with_structured_output(CLAIM_EVIDENCE_SCHEMA)
-    
+    json_only_instruction = (
+        "Return ONLY one valid JSON object. Do not include markdown fences, prose, "
+        "analysis text, or model-specific channel markers. The top-level JSON must "
+        "be an object whose keys are event descriptions and whose values are arrays "
+        "of strings."
+    )
+
     prompt = ChatPromptTemplate.from_messages([
         ("system", system_prompt),
         ("user", user_prompt),
+        ("user", json_only_instruction),
     ])
     
-    # chain = prompt | llm | StrOutputParser()
-    chain = prompt | structured_llm
-    # chain = prompt | llm
+    chain = prompt | llm | StrOutputParser()
 
     for attempt in range(max_retries):
         try:
@@ -425,11 +475,20 @@ def generate_anchor_queries(case_report_text: str,
                 print(f"Failed: Token limit exceeded after {max_retries} attempts")
                 print(f"Error: {e}")
                 return {}
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"LLM call failed on attempt {attempt + 1}/{max_retries}, retrying...")
+                print(f"Error: {e}")
+                continue
+            else:
+                print(f"Failed to get LLM response after {max_retries} attempts")
+                print(f"Error: {e}")
+                return {}
         # import pdb
         # pdb.set_trace()
-        if type(result) is dict:
+        if isinstance(result, dict):
             return result
-        elif type(result) is AIMessage:
+        elif isinstance(result, AIMessage):
             print('Pulling content from result')
             result = result.content
         try:
@@ -440,7 +499,7 @@ def generate_anchor_queries(case_report_text: str,
                 continue
             else:
                 print(f"Failed to parse JSON response from LLM after {max_retries} attempts: {e}")
-                print(f"Raw response: {result}")
+                print(f"Raw response excerpt: {str(result)[:2000]}")
                 return {}
         except Exception as e:
             print(f"Unexpected error on attempt {attempt + 1}: {e}")

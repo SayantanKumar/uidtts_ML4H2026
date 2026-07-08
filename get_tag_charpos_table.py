@@ -79,6 +79,71 @@ def load_timeline(timeline_file):
                 })
     return timeline_data
 
+
+def case_base_from_name(name):
+    base = Path(name).name
+    for suffix in ('.gz', '.txt', '.bsv', '.json'):
+        if base.endswith(suffix):
+            base = base[:-len(suffix)]
+    for suffix in ('_timeline_extracted', '_results', '_summary', '_positions_1',
+                   '_positions', '_timelines', '_timeline', '_extracted',
+                   '_joined', '_matches', '_tags', '_modified'):
+        if base.endswith(suffix):
+            base = base[:-len(suffix)]
+    return base
+
+def subject_id_candidates(name):
+    base = case_base_from_name(name)
+    candidates = []
+    if base:
+        candidates.append(base)
+    for token in re.findall(r'(?<!\d)\d{5,}(?!\d)', base):
+        if token not in candidates:
+            candidates.append(token)
+    return candidates
+
+def path_matches_subject_id(path, subject_id):
+    name = Path(path).name
+    return re.search(rf'(^|[^0-9]){re.escape(subject_id)}([^0-9]|$)', name) is not None
+
+def unique_paths(paths):
+    seen = set()
+    out = []
+    for path in paths:
+        key = str(path)
+        if key not in seen:
+            seen.add(key)
+            out.append(path)
+    return out
+
+def find_mention_file(input_path, base_name):
+    exact = input_path / f"{base_name}_uid4.bsv"
+    if exact.exists():
+        return exact
+
+    for subject_id in subject_id_candidates(base_name):
+        for candidate in input_path.glob(f"*{subject_id}*_uid4.bsv"):
+            if path_matches_subject_id(candidate, subject_id):
+                return candidate
+
+    return exact
+
+def find_timeline_files(timeline_dir, base_name):
+    exact = list(timeline_dir.glob(f"{base_name}_timelines_timeline_*.bsv.gz"))
+    exact += list(timeline_dir.glob(f"{base_name}_extracted.bsv.gz"))
+    if exact:
+        return unique_paths(exact)
+
+    matched = []
+    for subject_id in subject_id_candidates(base_name):
+        for pattern in (f"*{subject_id}*_timelines_timeline_*.bsv.gz",
+                        f"*{subject_id}*_extracted.bsv.gz"):
+            for candidate in timeline_dir.glob(pattern):
+                if path_matches_subject_id(candidate, subject_id):
+                    matched.append(candidate)
+
+    return unique_paths(matched)
+
 def process_file(input_file, output_file, join_mention=False, mention_file=None, timeline_dir=None, output_path=None):
     """Process a single file and write positions to output."""
     with open(input_file, 'r', encoding='utf-8') as f:
@@ -95,8 +160,7 @@ def process_file(input_file, output_file, join_mention=False, mention_file=None,
     timeline_data = []
     if timeline_dir:
         base_name = input_file.stem.replace('.txt', '')
-        timeline_files = list(timeline_dir.glob(f"{base_name}_timelines_timeline_*.bsv.gz"))
-        timeline_files += list(timeline_dir.glob(f"{base_name}_extracted.bsv.gz"))
+        timeline_files = find_timeline_files(timeline_dir, base_name)
         
         for timeline_file in timeline_files:
             timeline_index = re.sub(r"(\.[^.]+)+$", "", timeline_file.name).split('_')[-1]  # Extract index from filename
@@ -173,7 +237,7 @@ def main():
         mention_file = None
         if args.join_mention:
             base_name = input_file.stem.replace('.txt', '')
-            mention_file = input_path / f"{base_name}_uid4.bsv"
+            mention_file = find_mention_file(input_path, base_name)
         
         output_file = output_path / (input_file.stem + '_positions.bsv')
         

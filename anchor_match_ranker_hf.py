@@ -438,18 +438,44 @@ def process_case_report(
     return results
 
 
+def subject_id_candidates(case_name: str) -> List[str]:
+    """Return likely subject IDs embedded in a case filename."""
+    candidates = []
+
+    def add(value: str) -> None:
+        value = value.strip()
+        if value and value not in candidates:
+            candidates.append(value)
+
+    add(case_name)
+    for token in re.findall(r"(?<!\d)\d{5,}(?!\d)", case_name):
+        add(token)
+
+    return candidates
+
+
+def rag_dir_matches_subject(item_name: str, subject_id: str) -> bool:
+    """Match subject IDs as numeric tokens, not arbitrary substrings."""
+    return re.search(rf"(^|[^0-9]){re.escape(subject_id)}([^0-9]|$)", item_name) is not None
+
+
 def find_rag_case_dir(case_name: str, rag_dir: Path) -> Path:
-    numeric_part = case_name.split("-")[0]
+    subject_ids = subject_id_candidates(case_name)
 
     for item in rag_dir.iterdir():
-        if item.is_dir() and numeric_part in item.name:
-            return item
+        if item.is_dir() and any(rag_dir_matches_subject(item.name, subject_id) for subject_id in subject_ids):
+            chroma_files = list(item.glob("**/chroma.sqlite3"))
+            return chroma_files[0].parent if chroma_files else item
 
+    indexed_dirs = []
     for item in rag_dir.iterdir():
         if item.is_dir():
             chroma_files = list(item.glob("**/chroma.sqlite3"))
             if chroma_files:
-                return chroma_files[0].parent
+                indexed_dirs.append(chroma_files[0].parent)
+
+    if len(indexed_dirs) == 1:
+        return indexed_dirs[0]
 
     return None
 
@@ -607,4 +633,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

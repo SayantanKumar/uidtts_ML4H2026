@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, List, Any
 import argparse
 from datetime import datetime, timedelta
+import re
 
 def load_summary_mapping(mapping_file: Path) -> Dict[str, Dict[str, Any]]:
     """
@@ -25,9 +26,9 @@ def load_note_adms(note_adms_file: Path) -> pd.DataFrame:
     df = pd.read_csv(
         note_adms_file,
         compression='gzip' if note_adms_file.suffix == '.gz' else None,
-        dtype={'note_id': str, 'hadm_id': str},
+        dtype={'note_id': str, 'hadm_id': str, 'subject_id': str},
     )
-    for column in ('note_id', 'hadm_id'):
+    for column in ('note_id', 'hadm_id', 'subject_id'):
         if column in df.columns:
             df[column] = df[column].astype(str)
     return df
@@ -83,20 +84,58 @@ def extract_note_id_from_summary_filename(summary_filename: str) -> str:
         base_name = base_name[:-4]  # Remove '.txt'
     return base_name
 
+def candidate_ids_from_name(name: str) -> List[str]:
+    """
+    Return possible note/subject IDs from either a bare subject-id filename or
+    a longer filename such as 2024-..._annotations_103859_summary.csv.
+    """
+    base_name = Path(str(name)).name
+    for suffix in (
+        '.csv.gz', '.json.gz', '.txt.gz', '.bsv.gz',
+        '.csv', '.json', '.txt', '.bsv',
+    ):
+        if base_name.endswith(suffix):
+            base_name = base_name[:-len(suffix)]
+
+    for suffix in ('_summary', '_results', '_joined', '_timelines', '_extracted', '_tags'):
+        if base_name.endswith(suffix):
+            base_name = base_name[:-len(suffix)]
+
+    candidates = []
+
+    def add(value: str) -> None:
+        value = value.strip()
+        if value and value not in candidates:
+            candidates.append(value)
+
+    add(base_name)
+    if base_name.endswith('.txt'):
+        add(base_name[:-4])
+    for token in re.findall(r"(?<!\d)\d{5,}(?!\d)", base_name):
+        add(token)
+
+    return candidates
+
 def get_hadm_id_from_note_id(note_adms_df, note_id: str):
     """
     Get hadm_id for a given note_id from note_adms dataframe.
     """
-    note_id = str(note_id)
-    matching_rows = note_adms_df[note_adms_df['note_id'] == note_id]
-    if not matching_rows.empty:
-        return matching_rows.iloc[0]['hadm_id']
-    
-    ### Try using the note_id without the '-DS-xx-' part
-    mask = note_adms_df['note_id'].astype(str).str.match(fr'^{note_id}-')
-    matching_rows = note_adms_df[mask]
-    if not matching_rows.empty:
-        return matching_rows.iloc[0]['hadm_id']
+    for candidate_id in candidate_ids_from_name(str(note_id)):
+        matching_rows = note_adms_df[note_adms_df['note_id'] == candidate_id]
+        if not matching_rows.empty:
+            return matching_rows.iloc[0]['hadm_id']
+
+        if 'subject_id' in note_adms_df.columns:
+            matching_rows = note_adms_df[note_adms_df['subject_id'] == candidate_id]
+            if not matching_rows.empty:
+                return matching_rows.iloc[0]['hadm_id']
+
+        # Try using the note_id without the '-DS-xx-' part.
+        mask = note_adms_df['note_id'].astype(str).str.match(fr'^{re.escape(candidate_id)}-')
+        matching_rows = note_adms_df[mask]
+        if not matching_rows.empty:
+            return matching_rows.iloc[0]['hadm_id']
+
     return None
 
 def join_anchor_with_source(anchor_results_file: Path, summary_mapping_file: Path, 
