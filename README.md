@@ -1,141 +1,134 @@
+# UID Anchor Detection
 
-# Textual-Tabular Alignment
+This repository aligns clinical events mentioned in free-text notes with
+timestamped rows from structured EHR data. It also includes ablations for
+measuring the effects of anchor-query generation, timestamp visibility, and
+stable mention identifiers (`uid4`).
 
-This repository contains tools for aligning clinical events described in
-free-text notes with timestamped events from structured electronic health record
-(EHR) tables.
-
-The central use case is temporal alignment: a clinical note often describes
-events such as symptoms, treatments, diagnoses, transfers, procedures, and
-outcomes, but those mentions may be relative, incomplete, or ambiguous in time.
-Structured EHR data contains timestamped observations and interventions, but it
-is often difficult to know which rows correspond to which textual events. This
-project connects the two views.
-
-## Motivation
-
-Clinical timelines are usually distributed across two complementary sources:
-
-- **Textual data**, which gives rich clinical context but often describes time
-  indirectly.
-- **Tabular data**, which provides timestamps and structured values but lacks
-  narrative context.
-
-The goal of this project is to use language models and retrieval methods to
-bridge those sources. The pipeline extracts clinical event mentions from notes,
-assigns each mention a stable identifier, estimates an initial text-only
-timeline, retrieves relevant structured evidence, and produces a revised final
-timeline grounded in both text and tabular data.
-
-## High-Level Workflow
+## Pipeline
 
 ```text
 clinical note
-  -> event mention tagging
-  -> stable mention identifiers
-  -> initial text-only temporal table
-  -> anchor query generation
-  -> retrieval over patient-specific tabular data
-  -> matched timestamped evidence
-  -> final revised timeline
-  -> timeline and character-position outputs
+  -> tag event mentions and assign uid4 identifiers       (Steps 1-2)
+  -> create an initial text-only temporal table           (Steps 3-4)
+  -> build note/mention bundles                           (Step 5A)
+  -> generate structured-evidence anchor queries          (Step 5B)
+  -> embed patient-specific tabular rows                  (Step 5C)
+  -> retrieve, rerank, and join timestamped evidence      (Steps 5D-5E)
+  -> revise the timeline with an LLM                      (Step 6)
+  -> export timeline and character-position tables       (post-processing)
 ```
 
-## Pipeline Stages
+The standard pipeline uses generated anchor queries to retrieve relevant EHR
+rows. The final reasoner receives the note, initial mention table, matched
+structured evidence, and admission/discharge context.
 
-### 1. Event Mention Tagging
+## Ablations
 
-The pipeline first identifies clinically meaningful event mentions in each note.
-These may include symptoms, diagnoses, medications, procedures, hospital events,
-dispositions, complications, or other timeline-relevant events.
+| Variant | What changes | Submission wrapper | Final timeline directory |
+|---|---|---|---|
+| Standard | Full anchor-query retrieval and UID-aware final revision | `submit_qwen.sh` | `outputs/qwen35/timelines/` |
+| Blind | Uses standard retrieval, but hides matched row timestamps/events/values and admission/discharge context from the Step 6 reasoner | `submit_qwen_blind.sh` | `outputs/qwen35/timelines_blind/` |
+| E2RR | Replaces anchor-query matching in Steps 5D-5E with direct event-to-row retrieval and reranking | `submit_qwen_e2rr.sh` | `outputs/qwen35/timelines_e2rr/` |
+| No UID | Uses standard retrieval, but removes UID fields and tags from the Step 6 model input; a fail-closed audit checks for UID leakage | `submit_qwen_nouid.sh` | `outputs/qwen35/timelines_nouid/` |
 
-### 2. Stable Mention Identification
+E2RR uses `row_match_ranker_hf.py` and `join_row_with_source_timed.py`. The
+other variants reuse the standard Step 5 results and change the final timeline
+script and prompt:
 
-Each extracted event mention is assigned a stable short identifier. These
-identifiers allow the same event mention to be tracked across all later steps:
-initial temporal reasoning, structured-data retrieval, final timeline revision,
-and character-position output.
+| Variant | Step 6 implementation | Prompt |
+|---|---|---|
+| Standard | `assign_joint_timestamps.py` | `templates/ajt.txt` |
+| Blind | `assign_joint_timestamp_blind.py` | `templates/ajt_blind.txt` |
+| E2RR | `assign_joint_timestamp_noquery.py` | `templates/ajt.txt` |
+| No UID | `assign_joint_timestamp_nouid.py` | `templates/ajt_nouid.txt` |
 
-### 3. Initial Text-Only Temporal Reasoning
+## Running on Biowulf
 
-A language model estimates when each event occurred relative to admission or
-case presentation. This creates an initial temporal table from the note alone.
-The result is useful but may still be uncertain because narrative time can be
-ambiguous or incomplete.
+The `run_scripts_qwen/` scripts are Slurm/Biowulf scripts. Before submitting,
+edit their configuration blocks to match your environment, especially:
 
-### 4. Structured Evidence Querying
+- `PROJECT_DIR`, `INPUT_DIR`, `OUTPUT_DIR`, and `TABULAR_DIR`
+- `NOTE_LINK_PATH`
+- llama.cpp server and GGUF model paths
+- Hugging Face model/cache paths
+- Slurm resources and email address
 
-For each textual event mention, the system generates natural-language anchor
-queries describing what structured EHR evidence might help determine the event's
-time. For example, a medication mention may map to medication administration
-rows, while a procedure mention may map to procedure or order records.
+The wrappers submit each stage with `afterok` dependencies. Run one from the
+repository root, for example:
 
-### 5. Retrieval Over Tabular EHR Data
+```bash
+bash submit_qwen.sh
+```
 
-Patient-specific tabular records are summarized, embedded, and searched using
-the generated anchor queries. Retrieved candidates are reranked so that each
-textual event is paired with the most relevant timestamped structured evidence.
+To run an ablation instead:
 
-### 6. Final Timeline Revision
+```bash
+bash submit_qwen_blind.sh
+bash submit_qwen_e2rr.sh
+bash submit_qwen_nouid.sh
+```
 
-The final reasoning step combines the original note, the initial text-only
-timeline, and the retrieved structured evidence. The output is a revised
-timeline that can include multiple plausible timeline interpretations when the
-case remains ambiguous.
+Each wrapper runs Steps 1-4, Steps 5A-5E, Step 6, and the matching
+post-processing script. The E2RR wrapper selects `step_5d_e2rr.sh` and
+`step_5e_e2rr.sh`; blind and no-UID select their own Step 6 and post-processing
+scripts.
 
-### 7. Post-Processing
+For a single case, set the same selection in every script used by the wrapper:
 
-Final timeline JSON outputs are converted into tabular timeline files. The
-pipeline also produces character-position tables that link timeline rows back to
-the original tagged mention spans in the note.
+```bash
+export FILE_SELECTION_MODE="subset"
+SELECTED_INPUT_FILES=(
+    "11121324.txt"
+)
+```
 
-## Main Module
+Use `FILE_SELECTION_MODE="all"` to process every available case. Existing
+valid outputs are generally skipped, allowing interrupted jobs to resume.
 
-The current end-to-end implementation lives in:
+## Inputs
+
+The pipeline expects:
+
+- clinical notes as `.txt` or `.txt.gz` files
+- one patient-specific structured EHR file per subject, normally
+  `<subject_id>.csv.gz`, with timestamp, event, and value data
+- a note-link file containing identifiers and hospitalization times, including
+  `note_id`, `subject_id`, `hadm_id`, `admittime`, and `dischtime`
+- local LLM, embedding, and reranking models
+
+## Main Outputs
+
+With the default `OUTPUT_DIR=outputs/qwen35`, intermediate and final artifacts
+are organized as follows:
 
 ```text
-uid_anchor_detection/
+outputs/qwen35/
+  tagged/                                  tagged notes
+  tags/                                    uid4 mention tables
+  temporal/answers/                        initial temporal tables
+  bundle/uidtts/comparison_results/        standard joined evidence and JSON
+  bundle/uidtts/e2rr_comparison_results/   E2RR joined evidence and JSON
+  bundle/uidtts/blind_comparison_results/  blind Step 6 JSON
+  bundle/uidtts/nouid_comparison_results/  no-UID Step 6 JSON
+  timelines/                               standard final timeline tables
+  timelines_blind/                         blind final timeline tables
+  timelines_e2rr/                          E2RR final timeline tables
+  timelines_nouid/                         no-UID final timeline tables
+  logs/                                    server, stage, retry, and model-input logs
 ```
 
-That module includes:
+Final timeline tables are compressed BSV files. Post-processing also creates
+character-position tables that link timeline events back to mention spans.
+Treat notes, model-input logs, joined evidence, and outputs as protected
+clinical data.
 
-- prompt templates for event tagging, anchor-query generation, and timeline
-  revision
-- Python scripts for extraction, retrieval, reranking, joining, and
-  post-processing
-- Biowulf/Slurm batch scripts for stepwise or full-pipeline execution
-- a detailed operational runbook
+## Script Layout
 
-For implementation details and execution instructions, see:
-
-```text
-uid_anchor_detection/README.md
-uid_anchor_detection/UID_ANCHOR_DETECTION_RUNBOOK.md
-```
-
-## Expected Inputs
-
-At a high level, the pipeline expects:
-
-- clinical notes as plain text files
-- patient-specific structured EHR tables
-- a note-link/admission metadata file connecting notes to patient encounters
-- locally available language models and embedding/reranking models
-
-The structured EHR tables are expected to contain timestamped events and values
-for each patient or subject.
-
-## Expected Outputs
-
-The pipeline produces:
-
-- tagged clinical notes
-- stable event mention tables
-- initial text-only temporal tables
-- anchor queries for structured evidence
-- retrieved/reranked structured evidence matches
-- joined timestamped evidence rows
-- final revised timelines
-- character-position tables linking timeline rows to text spans
-
-
+- `run_scripts_qwen/`: current stepwise pipeline and ablation scripts
+- `run_scripts_qwen/models/`: model-specific full and partial pipeline scripts
+- `run_scripts_qwen/parallel/`: parallel/batch versions of the main stages
+- `templates/`: tagging, temporal, anchor-query, and final-revision prompts
+- `run_scripts/`: earlier pipeline scripts retained for compatibility
+- `UID_ANCHOR_DETECTION_RUNBOOK.md`: detailed operational background for the
+  earlier `run_scripts/` workflow
