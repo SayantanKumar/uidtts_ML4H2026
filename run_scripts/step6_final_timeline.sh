@@ -3,12 +3,11 @@
 #SBATCH --time=2-00:00:00
 #SBATCH --mem=64g
 #SBATCH --partition=gpu
-#SBATCH --qos=gpunlm2025.2
-#SBATCH --gres=gpu:a100:4
+#SBATCH --gres=gpu:a100:2
 #SBATCH --output=sbatch_output/slurm_%A_%a.out
 #SBATCH --error=sbatch_error/slurm_%A_%a.err
 #SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
-#SBATCH --mail-user=kumarsayantan94@gmail.com
+#SBATCH --mail-user=grimalditersans@nih.gov
 
 # Submit from the folder containing this script:
 #   mkdir -p sbatch_output sbatch_error
@@ -22,10 +21,11 @@ set -eo pipefail
 
 module load CUDA/12.8.1 gcc cmake
 
-set +u
-eval "$(conda shell.bash hook)"
-conda activate /data/kumars33/conda/envs/TTA
-set -u
+module purge
+module load CUDA/12.8.1 gcc/11.3.0 cmake/3.30.2
+
+source /data/grimalditersans/myconda
+conda activate /data/grimalditersans/mymamba/envs/TTA
 
 if [[ -n "${CUDA_HOME:-}" && -d "$CUDA_HOME/lib64" ]]; then
     export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
@@ -43,10 +43,10 @@ export no_proxy="$NO_PROXY"
 # Edit these paths/settings
 ###############################################################################
 
-export PROJECT_DIR="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/uid_anchor_detection"
+export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
 export SERVER_UTILS="$PROJECT_DIR/llm_server_utils.sh"
 
-export OUTPUT_DIR="$PROJECT_DIR/outputs/qwen35/"
+export OUTPUT_DIR="$PROJECT_DIR/outputs/gpt-oss-120b/"
 
 # Run either every completed Step 5 case or only the hard-coded subset below.
 # Use the original input filenames or bare case ids.
@@ -58,9 +58,9 @@ SELECTED_INPUT_FILES=(
 
 # File with note_id/hadm_id/admittime/dischtime mappings.
 # Must match the file used in Step 5.
-export NOTE_LINK_PATH="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/atp_tts/data/note_link_i2m4.csv"
+export NOTE_LINK_PATH="/data/grimalditersans/mimic_uid_data/note_link_i2m4.csv"
 
-export LLAMA_SERVER="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/llama.cpp/build2603/bin/llama-server"
+export LLAMA_SERVER="/data/grimalditersans/llama.cpp/build-cuda-gcc11/bin/llama-server"
 export LLAMA_LOG_DIR="$OUTPUT_DIR/logs"
 
 export CUDA_DEVICES="0,1"
@@ -68,11 +68,11 @@ export LLAMA_TIMEOUT=1200
 
 # Model roles. Both point to DeepSeek V3.2 for now; change either later if you
 # want separate instruct/reasoning models. Step 6 uses the reasoning model.
-export INSTRUCT_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf"
-export INSTRUCT_MODEL_ALIAS="qwen35"
+export INSTRUCT_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/gpt-oss-120b-F16.gguf"
+export INSTRUCT_MODEL_ALIAS="gpt-oss-120b"
 
-export REASONING_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf"
-export REASONING_MODEL_ALIAS="qwen35"
+export REASONING_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/gpt-oss-120b-F16.gguf"
+export REASONING_MODEL_ALIAS="gpt-oss-120b"
 export PORT=8082
 
 export AQG_INFIX="uidtts"

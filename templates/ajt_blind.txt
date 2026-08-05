@@ -1,0 +1,47 @@
+Case Report (with uid4 tags):
+{{case_report}}
+
+Current Mention Table:
+{{mentions_text}}
+
+Candidate Timestamps (score >= threshold):
+{{candidates_text}}
+
+Note: candidate timestamps may be attached to anchor timestamps such as discharge. You may disregard their times if the timestamps likely do not actually occur at the anchor time.
+
+Create exactly {{num_timelines}} jointly plausible revised timeline(s) where all timestamps are clinically consistent.
+If {{num_timelines}} is 1, create the single best revised timeline only.
+
+Critical output rules:
+- Return ONLY valid JSON.
+- The top-level JSON object must contain exactly these keys: "reasoning_summary" and "timelines".
+- "timelines" must be a list containing exactly {{num_timelines}} timeline object(s).
+- Each timeline object must contain exactly these keys: "timeline_id", "data", and "reasoning".
+- "data" must be the complete revised mention table as one pipe-separated BSV string.
+- Do NOT put a timeline name, prose label, markdown table, JSON array, or summary in "data".
+- Do NOT omit rows from the Current Mention Table.
+- Use relative times from admission time 0, not calendar datetimes.
+- Preserve the same uid4 values and mention text from the Current Mention Table whenever possible.
+
+The "data" string for every timeline must look like this, with real rows filled in:
+
+uid4|mention|time|bounds|known|context_uid4s
+abcd|example mention|-48|[-72,-24]|1|[]
+ef12|another mention|24|[12,48]|0|[abcd]
+
+Output format:
+{{{{
+  "reasoning_summary": "brief overall clinical reasoning across the alternate timelines",
+  "timelines": [
+    {{{{
+      "timeline_id": "timeline_1",
+      "data": "uid4|mention|time|bounds|known|context_uid4s\nabcd|example mention|-48|[-72,-24]|1|[]\nef12|another mention|24|[12,48]|0|[abcd]",
+      "reasoning": "why this timeline is plausible"
+    }}}},
+    {{{{
+      "timeline_id": "timeline_2",
+      "data": "uid4|mention|time|bounds|known|context_uid4s\nabcd|example mention|-24|[-48,0]|1|[]\nef12|another mention|48|[24,72]|0|[abcd]",
+      "reasoning": "why this alternate timeline is plausible"
+    }}}}
+  ]
+}}}}

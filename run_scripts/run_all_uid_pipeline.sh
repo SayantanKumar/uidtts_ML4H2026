@@ -8,7 +8,7 @@
 #SBATCH --output=sbatch_output/slurm_%A_%a.out
 #SBATCH --error=sbatch_error/slurm_%A_%a.err
 #SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
-#SBATCH --mail-user=sayantan.kumar@nih.gov
+#SBATCH --mail-user=grimalditersans@nih.gov
 
 # Submit from the folder containing this script:
 #   mkdir -p sbatch_output sbatch_error
@@ -21,12 +21,11 @@ shopt -s nullglob
 # Environment
 ###############################################################################
 
-module load CUDA/12.8.1 gcc cmake
+module purge
+module load CUDA/12.8.1 gcc/11.3.0 cmake/3.30.2
 
-set +u
-eval "$(conda shell.bash hook)"
-conda activate /data/kumars33/conda/envs/TTA
-set -u
+source /data/grimalditersans/myconda
+conda activate /data/grimalditersans/mymamba/envs/TTA
 
 if [[ -n "${CUDA_HOME:-}" && -d "$CUDA_HOME/lib64" ]]; then
     export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
@@ -43,11 +42,11 @@ export no_proxy="$NO_PROXY"
 # Edit these paths/settings
 ###############################################################################
 
-export PROJECT_DIR="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/uid_anchor_detection"
+export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
 export SERVER_UTILS="$PROJECT_DIR/llm_server_utils.sh"
 
-#export INPUT_DIR="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/multimodal_simple/new_annotations/files"
-export INPUT_DIR="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/atp_tts/data/i2m4_n30_notes/"
+#export INPUT_DIR="/data/CHARM-MIMIC/grimalditersans/LLM_pratice/Textual_tabular_alignment-main/multimodal_simple/new_annotations/files"
+export INPUT_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n30_notes/"
 export INPUT_TYPE="txt"
 export OUT_EXTENSION=".txt"
 
@@ -62,8 +61,8 @@ SELECTED_INPUT_FILES=(
 
 export OUTPUT_DIR="$PROJECT_DIR/outputs/DeepSeekV3.2/"
 
-export TABULAR_DIR="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/atp_tts/data/i2m4_n30_tabular/"
-export NOTE_LINK_PATH="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/atp_tts/data/note_link_i2m4.csv"
+export TABULAR_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n30_tabular/"
+export NOTE_LINK_PATH="/data/grimalditersans/mimic_uid_data/note_link_i2m4.csv"
 
 export TAG_PROMPT_FILE="$PROJECT_DIR/templates/tts_tag.txt"
 export TEMPORAL_PROMPT_FILE="$PROJECT_DIR/templates/temporal_prompt.txt"
@@ -71,7 +70,7 @@ export AQG_SYSTEM_PROMPT="$PROJECT_DIR/templates/aqg_system.txt"
 export AQG_USER_PROMPT="$PROJECT_DIR/templates/aqg_uid.txt"
 export AJT_PROMPT_FILE="$PROJECT_DIR/templates/ajt.txt"
 
-export LLAMA_SERVER="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/llama.cpp/build2603/bin/llama-server"
+export LLAMA_SERVER="/data/grimalditersans/llama.cpp/build-cuda-gcc11/bin/llama-server"
 export LLAMA_LOG_DIR="$OUTPUT_DIR/logs"
 export CUDA_DEVICES="0,1,2,3"
 export LLAMA_TIMEOUT=1200
@@ -94,7 +93,7 @@ export STEP1_CHUNK_LINES=450
 export STEP3_TAG_CHUNK_SIZE=60
 
 # Local Hugging Face embedding/reranker setup for Step 5C/D.
-export HF_HOME="/data/kumars33/.cache/huggingface/"
+export HF_HOME="/data/grimalditersans/.cache/huggingface/"  # what is this?
 export TRANSFORMERS_CACHE="$HF_HOME/hub"
 export HUGGINGFACE_HUB_CACHE="$HF_HOME/hub"
 export EMBEDDING_MODEL="Qwen/Qwen3-Embedding-8B"

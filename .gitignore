@@ -1,0 +1,37 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Generated outputs
+outputs/
+matching_outputs/
+sbatch_output/
+sbatch_error/
+
+# Model caches
+.cache/
+hf_cache/
+
+# Environment files
+.env
+.venv/
+venv/
+
+# Temporary files
+*.log
+*.tmp
+
+# Unrelated summary files
+for_matching_unification.py
+for_semantic_matching.py
+for_summary.py
+for_tabular_summary_from_llm_assistant.py
+
+# Additional run_scripts
+run_scripts/
+run_scripts_deepseek/
+run_scripts_glm/
+run_scripts_gpt/
+run_scripts_minimax/
+run_scripts_mistral/
+run_pipeline.sh

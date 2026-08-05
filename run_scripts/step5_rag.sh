@@ -8,7 +8,7 @@
 #SBATCH --output=sbatch_output/slurm_%A_%a.out
 #SBATCH --error=sbatch_error/slurm_%A_%a.err
 #SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
-#SBATCH --mail-user=sayantan.kumar@nih.gov
+#SBATCH --mail-user=grimalditersans@nih.gov
 
 # Submit from the folder containing this script:
 #   mkdir -p sbatch_output sbatch_error
@@ -24,7 +24,7 @@ module load CUDA/12.8.1 gcc cmake
 
 set +u
 eval "$(conda shell.bash hook)"
-conda activate /data/kumars33/conda/envs/TTA
+conda activate /data/grimalditersans/mymamba/envs/TTA
 set -u
 
 if [[ -n "${CUDA_HOME:-}" && -d "$CUDA_HOME/lib64" ]]; then
@@ -43,10 +43,10 @@ export no_proxy="$NO_PROXY"
 # Edit these paths/settings
 ###############################################################################
 
-export PROJECT_DIR="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/uid_anchor_detection"
+export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
 export SERVER_UTILS="$PROJECT_DIR/llm_server_utils.sh"
 
-export OUTPUT_DIR="$PROJECT_DIR/outputs/qwen35/"
+export OUTPUT_DIR="$PROJECT_DIR/outputs/gpt-oss-120b/"
 
 # Run either every completed upstream case or only the hard-coded subset below.
 # Use the original input filenames or bare case ids.
@@ -58,13 +58,13 @@ SELECTED_INPUT_FILES=(
 
 # Folder containing per-patient structured EHR CSVs, e.g. <patient_id>.csv.gz.
 # EDIT THIS if your tabular files are elsewhere.
-export TABULAR_DIR="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/atp_tts/data/i2m4_n30_tabular/"
+export TABULAR_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n30_tabular/"
 
 # File with note_id/hadm_id/admittime/dischtime mappings.
 # EDIT THIS before running Step 5 source joining.
-export NOTE_LINK_PATH="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/atp_tts/data/note_link_i2m4.csv"
+export NOTE_LINK_PATH="/data/grimalditersans/mimic_uid_data/note_link_i2m4.csv"
 
-export LLAMA_SERVER="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/llama.cpp/build2603/bin/llama-server"
+export LLAMA_SERVER="/data/grimalditersans/llama.cpp/build-cuda-gcc11/bin/llama-server"
 export LLAMA_LOG_DIR="$OUTPUT_DIR/logs"
 
 export CUDA_DEVICES="0,1"
@@ -73,11 +73,11 @@ export LLAMA_TIMEOUT=1200
 # Model roles. Both point to DeepSeek V3.2 for now; change either later if you
 # want separate instruct/reasoning models. Step 5B uses the reasoning model for
 # anchor-query generation.
-export INSTRUCT_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf"
-export INSTRUCT_MODEL_ALIAS="qwen35"
+export INSTRUCT_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/gpt-oss-120b-F16.gguf"
+export INSTRUCT_MODEL_ALIAS="gpt-oss-120b"
 
-export REASONING_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf"
-export REASONING_MODEL_ALIAS="qwen35"
+export REASONING_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/gpt-oss-120b-F16.gguf"
+export REASONING_MODEL_ALIAS="gpt-oss-120b"
 export PORT=8081
 
 # Local Hugging Face embedding/reranker setup. These are loaded directly with
@@ -87,7 +87,7 @@ export PORT=8081
 # cache so transformers can create lock files and resume downloads safely.
 # You can also replace EMBEDDING_MODEL/RERANKER_MODEL with full local snapshot
 # paths if the models are already downloaded elsewhere.
-export HF_HOME="/data/kumars33/.cache/huggingface/"
+export HF_HOME="/data/grimalditersans/.cache/huggingface/"
 export TRANSFORMERS_CACHE="$HF_HOME/hub"
 export HUGGINGFACE_HUB_CACHE="$HF_HOME/hub"
 

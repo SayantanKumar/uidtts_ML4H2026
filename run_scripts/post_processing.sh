@@ -8,7 +8,7 @@
 #SBATCH --output=sbatch_output/slurm_%A_%a.out
 #SBATCH --error=sbatch_error/slurm_%A_%a.err
 #SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
-#SBATCH --mail-user=kumarsayantan94@gmail.com
+#SBATCH --mail-user=grimalditersans@nih.gov
 
 # Submit from the folder containing this script:
 #   mkdir -p sbatch_output sbatch_error
@@ -24,7 +24,7 @@ module load CUDA/12.8.1 gcc cmake
 
 set +u
 eval "$(conda shell.bash hook)"
-conda activate /data/kumars33/conda/envs/TTA
+conda activate /data/grimalditersans/mymamba/envs/TTA
 set -u
 
 if [[ -n "${CUDA_HOME:-}" && -d "$CUDA_HOME/lib64" ]]; then
@@ -39,7 +39,7 @@ fi
 # Edit these paths/settings
 ###############################################################################
 
-export PROJECT_DIR="/data/CHARM-MIMIC/kumars33/LLM_pratice/Textual_tabular_alignment-main/uid_anchor_detection"
+export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
 export OUTPUT_DIR="$PROJECT_DIR/outputs/qwen35/"
 
 # Run either every completed Step 6 case or only the hard-coded subset below.
