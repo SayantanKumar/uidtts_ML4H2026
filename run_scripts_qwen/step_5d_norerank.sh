@@ -222,6 +222,7 @@ if ! python "$ANCHOR_RANKER_SCRIPT" compare \
     --folder "$EFFECTIVE_BUNDLE_DIR" \
     --anchor-subdir "$AQG_INFIX" \
     --rag-subdir "tabular/$RAG_INFIX" \
+    --output-dir "$COMPARISON_DIR" \
     --k "$TOP_K" \
     --embedding-model "$EMBEDDING_MODEL" \
     --device "$HF_DEVICE" \

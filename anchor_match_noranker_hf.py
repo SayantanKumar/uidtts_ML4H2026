@@ -325,6 +325,7 @@ def find_rag_case_dir(case_name: str, rag_dir: Path) -> Path:
 def process_folder(
     anchor_dir: Path,
     rag_dir: Path,
+    output_dir: Path,
     embedding_model: str,
     device: str,
     embedding_batch_size: int,
@@ -334,8 +335,8 @@ def process_folder(
     hide_tags: bool,
     trust_remote_code: bool,
 ) -> None:
-    results_dir = anchor_dir / "comparison_results"
-    results_dir.mkdir(exist_ok=True)
+    results_dir = output_dir
+    results_dir.mkdir(parents=True, exist_ok=True)
 
     embedding = get_embedding_model(
         embedding_model=embedding_model,
@@ -403,6 +404,7 @@ def main():
     parser.add_argument("--folder", default=".", help="Folder containing case data")
     parser.add_argument("--anchor-subdir", default="anchors", help="Directory containing anchor queries")
     parser.add_argument("--rag-subdir", default="embedding", help="Directory containing RAG embeddings")
+    parser.add_argument("--output-dir", default="timelines", help="Directory containing output files")
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--embedding-model", required=True, help="HF repo ID or local snapshot path")
     parser.add_argument("--device", default="auto", help="auto, cuda, cuda:0, or cpu")
@@ -428,6 +430,7 @@ def main():
     folder = Path(args.folder)
     anchor_dir = folder / args.anchor_subdir
     rag_dir = folder / args.rag_subdir
+    output_dir = folder / args.output_dir
 
     if not anchor_dir.exists():
         raise FileNotFoundError(f"Anchor subdirectory not found: {anchor_dir}")
@@ -438,6 +441,7 @@ def main():
         process_folder(
             anchor_dir=anchor_dir,
             rag_dir=rag_dir,
+            output_dir=output_dir,
             embedding_model=args.embedding_model,
             device=args.device,
             embedding_batch_size=args.embedding_batch_size,
