@@ -79,6 +79,16 @@ export AQG_INFIX="uidtts"
 export TAU=0.05
 export AJT_PROMPT_FILE="$PROJECT_DIR/templates/ajt.txt"
 
+# Step 6 prompt-size controls. The failed cases were hitting the llama-server
+# context limit, so keep the final-timeline prompt compact while still asking
+# for three alternate timelines.
+export STEP6_MAX_TOTAL_CANDIDATES=100
+export STEP6_TOP_K=3
+export STEP6_NUM_TIMELINES=3
+export STEP6_MAX_CANDIDATE_FIELD_CHARS=160
+export STEP6_MAX_CASE_REPORT_CHARS=30000
+export STEP6_CASE_CONTEXT_CHARS=220
+
 ###############################################################################
 # Derived paths
 ###############################################################################
@@ -400,6 +410,12 @@ for joined_file in "${joined_files[@]}"; do
         --template "$AJT_PROMPT_FILE" \
         --note-link "$NOTE_LINK_PATH" \
         --endpoint-type openai \
+        --max-total-candidates "$STEP6_MAX_TOTAL_CANDIDATES" \
+        --top-k "$STEP6_TOP_K" \
+        --num-timelines "$STEP6_NUM_TIMELINES" \
+        --max-candidate-field-chars "$STEP6_MAX_CANDIDATE_FIELD_CHARS" \
+        --max-case-report-chars "$STEP6_MAX_CASE_REPORT_CHARS" \
+        --case-context-chars "$STEP6_CASE_CONTEXT_CHARS" \
         --overwrite \
         >> "$STEP6_LOG" 2>&1; then
         log "WARNING: assign_joint_timestamps.py failed for $base; continuing" | tee -a "$STEP6_LOG"

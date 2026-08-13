@@ -1,0 +1,256 @@
+#!/bin/bash
+#SBATCH --job-name=uid_step5d
+#SBATCH --time=2-00:00:00
+#SBATCH --mem=128g
+#SBATCH --partition=gpu
+#SBATCH --gres=gpu:a100:1
+#SBATCH --output=sbatch_output/slurm_%j.out
+#SBATCH --error=sbatch_error/slurm_%j.err
+#SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
+#SBATCH --mail-user=grimalditersans@nih.gov
+
+# Submit from the folder containing this script:
+#   mkdir -p sbatch_output sbatch_error
+#   sbatch step5d_anchor_ranker.sh
+
+set -eo pipefail
+
+###############################################################################
+# Environment
+###############################################################################
+
+module load CUDA/12.8.1 gcc cmake
+
+module purge
+module load CUDA/12.8.1 gcc/11.3.0 cmake/3.30.2
+
+source /data/grimalditersans/myconda
+conda activate /data/grimalditersans/mymamba/envs/TTA
+
+if [[ -n "${CUDA_HOME:-}" && -d "$CUDA_HOME/lib64" ]]; then
+    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$CUDA_HOME/lib64:${LD_LIBRARY_PATH:-}"
+elif [[ -n "${CUDA_PATH:-}" && -d "$CUDA_PATH/lib64" ]]; then
+    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:$CUDA_PATH/lib64:${LD_LIBRARY_PATH:-}"
+else
+    export LD_LIBRARY_PATH="$CONDA_PREFIX/lib:${LD_LIBRARY_PATH:-}"
+fi
+
+###############################################################################
+# Paths and settings
+###############################################################################
+
+export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
+export OUTPUT_DIR="$PROJECT_DIR/outputs/qwen35"
+
+export BUNDLE_DIR="$OUTPUT_DIR/bundle"
+
+# Step 5B input.
+export AQG_INFIX="uidtts"
+export AQG_DIR="$BUNDLE_DIR/$AQG_INFIX"
+
+# Step 5C input.
+export RAG_INFIX="uid_infix"
+export RAG_OUTPUT_ROOT="$BUNDLE_DIR/tabular"
+export RAG_DIR="$RAG_OUTPUT_ROOT/$RAG_INFIX"
+
+# Step 5D output.
+export COMPARISON_DIR="$AQG_DIR/norerank_comparison_results"
+
+export LLAMA_LOG_DIR="$OUTPUT_DIR/logs"
+export STEP5_RANK_LOG="$LLAMA_LOG_DIR/step5d_anchor_ranker.log"
+
+export ANCHOR_RANKER_SCRIPT="$PROJECT_DIR/anchor_match_noranker_hf.py"
+
+###############################################################################
+# Hugging Face models
+###############################################################################
+
+export HF_HOME="/data/grimalditersans/.cache/huggingface"
+export TRANSFORMERS_CACHE="$HF_HOME/hub"
+export HUGGINGFACE_HUB_CACHE="$HF_HOME/hub"
+
+export EMBEDDING_MODEL="Qwen/Qwen3-Embedding-8B"
+
+export HF_DEVICE="auto"
+export EMBEDDING_BATCH_SIZE=8
+export HF_MAX_LENGTH=8192
+
+export TOP_K=10
+
+###############################################################################
+# File selection
+###############################################################################
+
+export FILE_SELECTION_MODE="all"  # all|subset
+SELECTED_INPUT_FILES=(
+    # "11121324.txt"
+    # "11649157.txt"
+)
+
+export SELECTION_WORK_DIR="$OUTPUT_DIR/selection_work"
+export PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}"
+
+###############################################################################
+# Helpers
+###############################################################################
+
+timestamp() {
+    date "+%Y-%m-%d %H:%M:%S"
+}
+
+log() {
+    echo "[$(timestamp)] $*"
+}
+
+die() {
+    echo "[$(timestamp)] ERROR: $*" >&2
+    exit 1
+}
+
+check_path() {
+    local path="$1"
+    local label="$2"
+    [[ -e "$path" ]] || die "Missing $label: $path"
+}
+
+has_nonblank_content() {
+    local file="$1"
+    [[ -s "$file" ]] &&
+        awk 'NF { found=1 } END { exit found ? 0 : 1 }' "$file"
+}
+
+###############################################################################
+# Load file-selection helpers
+###############################################################################
+
+SELECTION_UTILS="$PROJECT_DIR/run_scripts/file_selection_utils.sh"
+if [[ ! -f "$SELECTION_UTILS" ]]; then
+    RUN_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SELECTION_UTILS="$RUN_SCRIPT_DIR/file_selection_utils.sh"
+fi
+
+check_path "$SELECTION_UTILS" "file_selection_utils.sh"
+source "$SELECTION_UTILS"
+init_file_selection
+
+###############################################################################
+# Preflight
+###############################################################################
+
+mkdir -p \
+    "$HF_HOME" \
+    "$TRANSFORMERS_CACHE" \
+    "$HUGGINGFACE_HUB_CACHE" \
+    "$COMPARISON_DIR" \
+    "$LLAMA_LOG_DIR" \
+    "$SELECTION_WORK_DIR"
+
+check_path "$PROJECT_DIR" "project directory"
+check_path "$BUNDLE_DIR" "bundle directory"
+check_path "$AQG_DIR" "Step 5B anchor-query directory"
+check_path "$RAG_DIR" "Step 5C RAG directory"
+check_path "$ANCHOR_RANKER_SCRIPT" "anchor ranker script"
+
+shopt -s nullglob
+
+anchor_jsons=("$AQG_DIR"/*.json)
+filter_selected_files_in_place anchor_jsons
+
+[[ "${#anchor_jsons[@]}" -gt 0 ]] ||
+    die "No selected Step 5B anchor-query files found in $AQG_DIR"
+
+for anchor_json in "${anchor_jsons[@]}"; do
+    has_nonblank_content "$anchor_json" ||
+        die "Anchor-query file is empty: $anchor_json"
+
+    python -m json.tool "$anchor_json" >/dev/null ||
+        die "Anchor-query file is invalid JSON: $anchor_json"
+done
+
+rag_dirs=("$RAG_DIR"/*)
+
+[[ "${#rag_dirs[@]}" -gt 0 ]] ||
+    die "No Step 5C RAG indexes found in $RAG_DIR"
+
+log "Job ID: ${SLURM_JOB_ID:-manual}"
+log "Step 5B input directory: $AQG_DIR"
+log "Step 5C input directory: $RAG_DIR"
+log "Step 5D output directory: $COMPARISON_DIR"
+log_file_selection
+log "Anchor-query files: ${#anchor_jsons[@]}"
+log "Embedding model: $EMBEDDING_MODEL"
+log "Device: $HF_DEVICE"
+log "Top K: $TOP_K"
+log "Using Python: $(which python)"
+log "Python version: $(python --version)"
+
+###############################################################################
+# Prepare effective folder layout
+###############################################################################
+
+EFFECTIVE_BUNDLE_DIR="$BUNDLE_DIR"
+
+if selection_enabled; then
+    EFFECTIVE_BUNDLE_DIR="$SELECTION_WORK_DIR/step5d_bundle_${SLURM_JOB_ID:-manual}_$$"
+    EFFECTIVE_AQG_DIR="$EFFECTIVE_BUNDLE_DIR/$AQG_INFIX"
+    EFFECTIVE_RAG_DIR="$EFFECTIVE_BUNDLE_DIR/tabular/$RAG_INFIX"
+
+    mkdir -p "$EFFECTIVE_AQG_DIR" "$EFFECTIVE_RAG_DIR"
+
+    # Stage only the selected Step 5B anchor-query files.
+    stage_selected_files_for_bases \
+        "$EFFECTIVE_AQG_DIR" \
+        "$AQG_DIR/{}.json"
+
+    # Stage only the corresponding Step 5C RAG index directories.
+    stage_selected_files_for_bases \
+        "$EFFECTIVE_RAG_DIR" \
+        "$RAG_DIR/${RAG_INFIX}_{}.csv"
+
+    # Keep Step 5D results in the permanent output directory.
+    ln -sfn "$COMPARISON_DIR" \
+        "$EFFECTIVE_AQG_DIR/comparison_results"
+fi
+
+###############################################################################
+# Step 5D: compare anchor queries against RAG summaries
+###############################################################################
+
+log "Starting Step 5D anchor matching"
+
+if ! python "$ANCHOR_RANKER_SCRIPT" compare \
+    --folder "$EFFECTIVE_BUNDLE_DIR" \
+    --anchor-subdir "$AQG_INFIX" \
+    --rag-subdir "tabular/$RAG_INFIX" \
+    --k "$TOP_K" \
+    --embedding-model "$EMBEDDING_MODEL" \
+    --device "$HF_DEVICE" \
+    --embedding-batch-size "$EMBEDDING_BATCH_SIZE" \
+    --max-length "$HF_MAX_LENGTH" \
+    > "$STEP5_RANK_LOG" 2>&1; then
+    log "WARNING: anchor_match_noranker_hf.py returned a nonzero status"
+fi
+
+###############################################################################
+# Validate Step 5D outputs
+###############################################################################
+
+validated_count=0
+
+for anchor_json in "${anchor_jsons[@]}"; do
+    case_name="$(basename "$anchor_json" .json)"
+    results_file="$COMPARISON_DIR/${case_name}_results.json"
+
+    has_nonblank_content "$results_file" ||
+        die "Missing or empty Step 5D result: $results_file"
+
+    python -m json.tool "$results_file" >/dev/null ||
+        die "Invalid Step 5D result JSON: $results_file"
+
+    validated_count=$((validated_count + 1))
+done
+
+log "Step 5D complete"
+log "Validated comparison results: $validated_count"
+log "Output for Step 5E: $COMPARISON_DIR"
+log "Ranker log: $STEP5_RANK_LOG"
