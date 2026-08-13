@@ -3,7 +3,7 @@
 This repository aligns clinical events mentioned in free-text notes with
 timestamped rows from structured EHR data. It also includes ablations for
 measuring the effects of anchor-query generation, timestamp visibility, and
-stable mention identifiers (`uid4`).
+stable mention identifiers (`uid4`), as well as retrieval reranking.
 
 ## Pipeline
 
@@ -31,10 +31,12 @@ structured evidence, and admission/discharge context.
 | Blind | Uses standard retrieval, but hides matched row timestamps/events/values and admission/discharge context from the Step 6 reasoner | `submit_qwen_blind.sh` | `outputs/qwen35/timelines_blind/` |
 | E2RR | Replaces anchor-query matching in Steps 5D-5E with direct event-to-row retrieval and reranking | `submit_qwen_e2rr.sh` | `outputs/qwen35/timelines_e2rr/` |
 | No UID | Uses standard retrieval, but removes UID fields and tags from the Step 6 model input; a fail-closed audit checks for UID leakage | `submit_qwen_nouid.sh` | `outputs/qwen35/timelines_nouid/` |
+| No Reranker | Keeps anchor-query retrieval, but ranks candidates only by embedding cosine similarity and skips the reranker model | Manual Steps 5D-6 and post-processing (see below) | `outputs/qwen35/timelines/` (shared with Standard) |
 
 E2RR uses `row_match_ranker_hf.py` and `join_row_with_source_timed.py`. The
-other variants reuse the standard Step 5 results and change the final timeline
-script and prompt:
+No Reranker variant uses `anchor_match_noranker_hf.py`, followed by the standard
+anchor/source join and final timeline reasoner. The other variants reuse the
+standard Step 5 results and change the final timeline script and prompt:
 
 | Variant | Step 6 implementation | Prompt |
 |---|---|---|
@@ -42,6 +44,7 @@ script and prompt:
 | Blind | `assign_joint_timestamp_blind.py` | `templates/ajt_blind.txt` |
 | E2RR | `assign_joint_timestamp_noquery.py` | `templates/ajt.txt` |
 | No UID | `assign_joint_timestamp_nouid.py` | `templates/ajt_nouid.txt` |
+| No Reranker | `assign_joint_timestamps.py` | `templates/ajt.txt` |
 
 ## Running on Biowulf
 
@@ -68,6 +71,22 @@ bash submit_qwen_blind.sh
 bash submit_qwen_e2rr.sh
 bash submit_qwen_nouid.sh
 ```
+
+The No Reranker ablation currently has no top-level wrapper. After completing
+Steps 1-5C, submit its remaining stages with dependencies, for example:
+
+```bash
+cd run_scripts_qwen
+j5d=$(sbatch --parsable step_5d_norerank.sh); j5d=${j5d%%;*}
+j5e=$(sbatch --parsable --dependency=afterok:"$j5d" step_5e_norerank.sh); j5e=${j5e%%;*}
+j6=$(sbatch --parsable --dependency=afterok:"$j5e" step_6_norerank.sh); j6=${j6%%;*}
+sbatch --dependency=afterok:"$j6" post_processing_norerank.sh
+```
+
+Its intermediate results are isolated under `norerank_comparison_results`, but
+its post-processing script currently writes final timelines to the standard
+`timelines/` directory. Use a separate `OUTPUT_DIR` when comparing Standard and
+No Reranker runs to avoid mixing their final files.
 
 Each wrapper runs Steps 1-4, Steps 5A-5E, Step 6, and the matching
 post-processing script. The E2RR wrapper selects `step_5d_e2rr.sh` and
@@ -111,6 +130,7 @@ outputs/qwen35/
   bundle/uidtts/e2rr_comparison_results/   E2RR joined evidence and JSON
   bundle/uidtts/blind_comparison_results/  blind Step 6 JSON
   bundle/uidtts/nouid_comparison_results/  no-UID Step 6 JSON
+  bundle/uidtts/norerank_comparison_results/ no-reranker joined evidence and JSON
   timelines/                               standard final timeline tables
   timelines_blind/                         blind final timeline tables
   timelines_e2rr/                          E2RR final timeline tables
