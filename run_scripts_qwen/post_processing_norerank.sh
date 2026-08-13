@@ -58,7 +58,7 @@ export AQG_INFIX="uidtts"
 
 export BUNDLE_DIR="$OUTPUT_DIR/bundle"
 export TEMPORAL_ANSWERS_DIR="$OUTPUT_DIR/temporal/answers"
-export TIMELINES_DIR="$OUTPUT_DIR/timelines"
+export TIMELINES_DIR="$OUTPUT_DIR/timelines_noranker"
 export CHARPOS_DIR="$BUNDLE_DIR/charpos"
 export CHARPOS_UNREVISED_DIR="$BUNDLE_DIR/charpos_unrevised"
 export COMPARISON_DIR="$BUNDLE_DIR/$AQG_INFIX/norerank_comparison_results"
