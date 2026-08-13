@@ -31,7 +31,7 @@ structured evidence, and admission/discharge context.
 | Blind | Uses standard retrieval, but hides matched row timestamps/events/values and admission/discharge context from the Step 6 reasoner | `submit_qwen_blind.sh` | `outputs/qwen35/timelines_blind/` |
 | E2RR | Replaces anchor-query matching in Steps 5D-5E with direct event-to-row retrieval and reranking | `submit_qwen_e2rr.sh` | `outputs/qwen35/timelines_e2rr/` |
 | No UID | Uses standard retrieval, but removes UID fields and tags from the Step 6 model input; a fail-closed audit checks for UID leakage | `submit_qwen_nouid.sh` | `outputs/qwen35/timelines_nouid/` |
-| No Reranker | Keeps anchor-query retrieval, but ranks candidates only by embedding cosine similarity and skips the reranker model | Manual Steps 5D-6 and post-processing (see below) | `outputs/qwen35/timelines/` (shared with Standard) |
+| No Reranker | Keeps anchor-query retrieval, but ranks candidates only by embedding cosine similarity and skips the reranker model | `submit_qwen_noranker.sh` | `outputs/qwen35/timelines/` (shared with Standard) |
 
 E2RR uses `row_match_ranker_hf.py` and `join_row_with_source_timed.py`. The
 No Reranker variant uses `anchor_match_noranker_hf.py`, followed by the standard
@@ -70,20 +70,11 @@ To run an ablation instead:
 bash submit_qwen_blind.sh
 bash submit_qwen_e2rr.sh
 bash submit_qwen_nouid.sh
+bash submit_qwen_noranker.sh
 ```
 
-The No Reranker ablation currently has no top-level wrapper. After completing
-Steps 1-5C, submit its remaining stages with dependencies, for example:
-
-```bash
-cd run_scripts_qwen
-j5d=$(sbatch --parsable step_5d_norerank.sh); j5d=${j5d%%;*}
-j5e=$(sbatch --parsable --dependency=afterok:"$j5d" step_5e_norerank.sh); j5e=${j5e%%;*}
-j6=$(sbatch --parsable --dependency=afterok:"$j5e" step_6_norerank.sh); j6=${j6%%;*}
-sbatch --dependency=afterok:"$j6" post_processing_norerank.sh
-```
-
-Its intermediate results are isolated under `norerank_comparison_results`, but
+No Reranker's intermediate results are isolated under
+`norerank_comparison_results`, but
 its post-processing script currently writes final timelines to the standard
 `timelines/` directory. Use a separate `OUTPUT_DIR` when comparing Standard and
 No Reranker runs to avoid mixing their final files.
@@ -91,7 +82,7 @@ No Reranker runs to avoid mixing their final files.
 Each wrapper runs Steps 1-4, Steps 5A-5E, Step 6, and the matching
 post-processing script. The E2RR wrapper selects `step_5d_e2rr.sh` and
 `step_5e_e2rr.sh`; blind and no-UID select their own Step 6 and post-processing
-scripts.
+scripts; No Reranker selects its own Steps 5D-6 and post-processing scripts.
 
 For a single case, set the same selection in every script used by the wrapper:
 
