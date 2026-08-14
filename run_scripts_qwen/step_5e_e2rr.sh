@@ -30,7 +30,7 @@ conda activate /data/grimalditersans/mymamba/envs/TTA
 ###############################################################################
 
 export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
-export OUTPUT_DIR="$PROJECT_DIR/outputs/qwen35"
+export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-qwen35}}"
 
 # Original per-patient tabular data.
 export TABULAR_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n30_tabular"

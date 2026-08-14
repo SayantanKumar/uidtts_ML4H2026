@@ -46,7 +46,7 @@ export no_proxy="$NO_PROXY"
 export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
 export SERVER_UTILS="$PROJECT_DIR/llm_server_utils.sh"
 
-export OUTPUT_DIR="$PROJECT_DIR/outputs/qwen35/"
+export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-qwen35}}"
 
 # Run either every completed Step 5 case or only the hard-coded subset below.
 # Use the original input filenames or bare case ids.
@@ -66,13 +66,13 @@ export LLAMA_LOG_DIR="$OUTPUT_DIR/logs"
 export CUDA_DEVICES="0,1"
 export LLAMA_TIMEOUT=1200
 
-# Model roles. Both point to DeepSeek V3.2 for now; change either later if you
-# want separate instruct/reasoning models. Step 6 uses the reasoning model.
-export INSTRUCT_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf"
-export INSTRUCT_MODEL_ALIAS="qwen35"
+# Model roles. Wrapper-provided values take precedence over these Qwen defaults.
+# Step 6 uses the reasoning model.
+export INSTRUCT_MODEL_PATH="${INSTRUCT_MODEL_PATH:-/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf}"
+export INSTRUCT_MODEL_ALIAS="${INSTRUCT_MODEL_ALIAS:-qwen35}"
 
-export REASONING_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf"
-export REASONING_MODEL_ALIAS="qwen35"
+export REASONING_MODEL_PATH="${REASONING_MODEL_PATH:-/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf}"
+export REASONING_MODEL_ALIAS="${REASONING_MODEL_ALIAS:-qwen35}"
 export PORT=8082
 
 export AQG_INFIX="uidtts"

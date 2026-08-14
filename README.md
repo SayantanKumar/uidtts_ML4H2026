@@ -27,11 +27,11 @@ structured evidence, and admission/discharge context.
 
 | Variant | What changes | Submission wrapper | Final timeline directory |
 |---|---|---|---|
-| Standard | Full anchor-query retrieval and UID-aware final revision | `submit_qwen.sh` | `outputs/qwen35/timelines/` |
-| Blind | Uses standard retrieval, but hides matched row timestamps/events/values and admission/discharge context from the Step 6 reasoner | `submit_qwen_blind.sh` | `outputs/qwen35/timelines_blind/` |
-| E2RR | Replaces anchor-query matching in Steps 5D-5E with direct event-to-row retrieval and reranking | `submit_qwen_e2rr.sh` | `outputs/qwen35/timelines_e2rr/` |
-| No UID | Uses standard retrieval, but removes UID fields and tags from the Step 6 model input; a fail-closed audit checks for UID leakage | `submit_qwen_nouid.sh` | `outputs/qwen35/timelines_nouid/` |
-| No Reranker | Keeps anchor-query retrieval, but ranks candidates only by embedding cosine similarity and skips the reranker model | `submit_qwen_noranker.sh` | `outputs/qwen35/timelines_noranker/` |
+| Standard | Full anchor-query retrieval and UID-aware final revision | `submit_qwen.sh` | `outputs/<model-output-name>/timelines/` |
+| Blind | Uses standard retrieval, but hides matched row timestamps/events/values and admission/discharge context from the Step 6 reasoner | `submit_qwen_blind.sh` | `outputs/<model-output-name>/timelines_blind/` |
+| E2RR | Replaces anchor-query matching in Steps 5D-5E with direct event-to-row retrieval and reranking | `submit_qwen_e2rr.sh` | `outputs/<model-output-name>/timelines_e2rr/` |
+| No UID | Uses standard retrieval, but removes UID fields and tags from the Step 6 model input; a fail-closed audit checks for UID leakage | `submit_qwen_nouid.sh` | `outputs/<model-output-name>/timelines_nouid/` |
+| No Reranker | Keeps anchor-query retrieval, but ranks candidates only by embedding cosine similarity and skips the reranker model | `submit_qwen_noranker.sh` | `outputs/<model-output-name>/timelines_noranker/` |
 
 E2RR uses `row_match_ranker_hf.py` and `join_row_with_source_timed.py`. The
 No Reranker variant uses `anchor_match_noranker_hf.py`, followed by the standard
@@ -51,32 +51,59 @@ standard Step 5 results and change the final timeline script and prompt:
 The `run_scripts_qwen/` scripts are Slurm/Biowulf scripts. Before submitting,
 edit their configuration blocks to match your environment, especially:
 
-- `PROJECT_DIR`, `INPUT_DIR`, `OUTPUT_DIR`, and `TABULAR_DIR`
+- `PROJECT_DIR`, `INPUT_DIR`, and `TABULAR_DIR`
 - `NOTE_LINK_PATH`
-- llama.cpp server and GGUF model paths
+- llama.cpp server path
 - Hugging Face model/cache paths
 - Slurm resources and email address
 
 The wrappers submit each stage with `afterok` dependencies. Run one from the
-repository root, for example:
+repository root. With no model arguments, they retain the Qwen 3.5 defaults:
 
 ```bash
 bash submit_qwen.sh
 ```
 
+To select a different GGUF model, pass its path and a short alias. The alias is
+also used for the output folder, so this example writes beneath
+`outputs/glm52/`:
+
+```bash
+bash submit_qwen.sh \
+  --model-path /data/models/GLM-5.2-00001-of-00006.gguf \
+  --model-alias glm52
+```
+
+The instruct and reasoning stages can use different models. When their aliases
+differ, the default output name is `<instruct-alias>-to-<reasoning-alias>`:
+
+```bash
+bash submit_qwen.sh \
+  --instruct-model-path /data/models/instruct/model.gguf \
+  --instruct-model-alias instruct7b \
+  --reasoning-model-path /data/models/reasoning/model.gguf \
+  --reasoning-model-alias reasoner70b
+```
+
+That example writes beneath `outputs/instruct7b-to-reasoner70b/`. Use
+`--output-name NAME` to choose another folder under `PROJECT_DIR/outputs`, or
+`--output-dir DIR` to provide the complete output path. Run any wrapper with
+`--help` for the complete option list.
+
 To run an ablation instead:
 
 ```bash
-bash submit_qwen_blind.sh
-bash submit_qwen_e2rr.sh
-bash submit_qwen_nouid.sh
-bash submit_qwen_noranker.sh
+bash submit_qwen_blind.sh --model-path /data/models/model.gguf --model-alias mymodel
+bash submit_qwen_e2rr.sh --model-path /data/models/model.gguf --model-alias mymodel
+bash submit_qwen_nouid.sh --model-path /data/models/model.gguf --model-alias mymodel
+bash submit_qwen_noranker.sh --model-path /data/models/model.gguf --model-alias mymodel
 ```
 
-Each wrapper runs Steps 1-4, Steps 5A-5E, Step 6, and the matching
-post-processing script. The E2RR wrapper selects `step_5d_e2rr.sh` and
-`step_5e_e2rr.sh`; blind and no-UID select their own Step 6 and post-processing
-scripts; No Reranker selects its own Steps 5D-6 and post-processing scripts.
+The standard wrapper runs Steps 1-6 and post-processing. E2RR and No Reranker
+start at Step 5D and therefore require Steps 1-5C for the same output folder.
+Blind and No UID start at Step 6 and require the standard results through Step
+5E. Pass the same model and output arguments to the prerequisite and ablation
+wrappers so they read and write the same model-specific folder.
 
 For a single case, set the same selection in every script used by the wrapper:
 
@@ -103,11 +130,11 @@ The pipeline expects:
 
 ## Main Outputs
 
-With the default `OUTPUT_DIR=outputs/qwen35`, intermediate and final artifacts
-are organized as follows:
+For a single model alias, artifacts are written beneath
+`outputs/<model-alias>/`. The default remains `outputs/qwen35/`:
 
 ```text
-outputs/qwen35/
+outputs/<model-output-name>/
   tagged/                                  tagged notes
   tags/                                    uid4 mention tables
   temporal/answers/                        initial temporal tables

@@ -40,7 +40,7 @@ fi
 ###############################################################################
 
 export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
-export OUTPUT_DIR="$PROJECT_DIR/outputs/qwen35/"
+export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-qwen35}}"
 
 # Run either every completed Step 6 case or only the hard-coded subset below.
 # Use the original input filenames or bare case ids.

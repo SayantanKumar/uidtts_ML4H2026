@@ -2,10 +2,12 @@
 set -euo pipefail
 
 # Run with:
-#   bash submit_qwen.sh
+#   bash submit_qwen.sh --model-path /path/to/model.gguf --model-alias NAME
 
 WRAPPER_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SCRIPT_DIR="$WRAPPER_DIR/run_scripts_qwen"
+source "$WRAPPER_DIR/submit_model_utils.sh"
+configure_model_submission "$(basename "$0")" "$@"
 
 [[ -d "$SCRIPT_DIR" ]] || {
     echo "Directory not found: $SCRIPT_DIR" >&2
@@ -15,32 +17,23 @@ SCRIPT_DIR="$WRAPPER_DIR/run_scripts_qwen"
 cd "$SCRIPT_DIR"
 mkdir -p sbatch_output sbatch_error
 
-j12=$(sbatch --parsable step_12_uid_tagging.sh)
-j12=${j12%%;*}
+j12=$(submit_model_job step_12_uid_tagging.sh)
 
-j34=$(sbatch --parsable --dependency=afterok:"$j12" step_34_temporal.sh)
-j34=${j34%%;*}
+j34=$(submit_model_job --dependency=afterok:"$j12" step_34_temporal.sh)
 
-j5a=$(sbatch --parsable --dependency=afterok:"$j34" step_5a.sh)
-j5a=${j5a%%;*}
+j5a=$(submit_model_job --dependency=afterok:"$j34" step_5a.sh)
 
-j5b=$(sbatch --parsable --dependency=afterok:"$j5a" step_5b.sh)
-j5b=${j5b%%;*}
+j5b=$(submit_model_job --dependency=afterok:"$j5a" step_5b.sh)
 
-j5c=$(sbatch --parsable --dependency=afterok:"$j5b" step_5c.sh)
-j5c=${j5c%%;*}
+j5c=$(submit_model_job --dependency=afterok:"$j5b" step_5c.sh)
 
-j5d=$(sbatch --parsable --dependency=afterok:"$j5c" step_5d.sh)
-j5d=${j5d%%;*}
+j5d=$(submit_model_job --dependency=afterok:"$j5c" step_5d.sh)
 
-j5e=$(sbatch --parsable --dependency=afterok:"$j5d" step_5e.sh)
-j5e=${j5e%%;*}
+j5e=$(submit_model_job --dependency=afterok:"$j5d" step_5e.sh)
 
-j6=$(sbatch --parsable --dependency=afterok:"$j5e" step6_final_timeline.sh)
-j6=${j6%%;*}
+j6=$(submit_model_job --dependency=afterok:"$j5e" step6_final_timeline.sh)
 
-jpost=$(sbatch --parsable --dependency=afterok:"$j6" post_processing.sh)
-jpost=${jpost%%;*}
+jpost=$(submit_model_job --dependency=afterok:"$j6" post_processing.sh)
 
 printf 'Submitted dependency chain:\n'
 printf '12=%s → 34=%s → 5a=%s → 5b=%s → 5c=%s → 5d=%s → 5e=%s → 6=%s → post=%s\n' \

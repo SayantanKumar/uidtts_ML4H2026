@@ -60,7 +60,7 @@ SELECTED_INPUT_FILES=(
     # "11649157.txt"
 )
 
-export OUTPUT_DIR="$PROJECT_DIR/outputs/qwen35"
+export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-qwen35}}"
 # export OUTPUT_DIR="/data/CHARM-MIMIC/grimalditersans/LLM_pratice/sample_annotations/"  # what is this?
 
 # Set to "txt.gz" if INPUT_DIR contains compressed reports.
@@ -81,13 +81,12 @@ export LLAMA_LOG_DIR="$OUTPUT_DIR/logs"
 export CUDA_DEVICES="0,1"
 export LLAMA_TIMEOUT=1200
 
-# Model roles. Both point to DeepSeek V3.2 for now; change either later if you
-# want separate instruct/reasoning models.
-export INSTRUCT_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf"
-export INSTRUCT_MODEL_ALIAS="baal"
+# Model roles. Wrapper-provided values take precedence over these Qwen defaults.
+export INSTRUCT_MODEL_PATH="${INSTRUCT_MODEL_PATH:-/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf}"
+export INSTRUCT_MODEL_ALIAS="${INSTRUCT_MODEL_ALIAS:-qwen35}"
 
-export REASONING_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf"
-export REASONING_MODEL_ALIAS="baal"
+export REASONING_MODEL_PATH="${REASONING_MODEL_PATH:-/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf}"
+export REASONING_MODEL_ALIAS="${REASONING_MODEL_ALIAS:-qwen35}"
 export PORT=8080
 
 # Leave empty unless the llama-server model needs extra OpenAI body options.
