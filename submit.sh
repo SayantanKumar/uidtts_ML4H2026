@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # Run with:
-#   bash submit_qwen.sh --model-path /path/to/model.gguf --model-alias NAME
+#   bash submit.sh --model-path /path/to/model.gguf --model-alias NAME
 
 WRAPPER_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_DIR="$WRAPPER_DIR/run_scripts_qwen"
+SCRIPT_DIR="$WRAPPER_DIR/run_scripts_slurm"
 source "$WRAPPER_DIR/submit_model_utils.sh"
 configure_model_submission "$(basename "$0")" "$@"
 
