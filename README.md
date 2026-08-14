@@ -48,11 +48,12 @@ standard Step 5 results and change the final timeline script and prompt:
 
 ## Running on Biowulf
 
-The `run_scripts_slurm/` scripts are Slurm/Biowulf scripts. Before submitting,
-edit their configuration blocks to match your environment, especially:
+The `run_scripts_slurm/` scripts are Slurm/Biowulf scripts. The submission
+wrappers define the source-data and GGUF model paths used by every stage. Other
+environment-specific settings remain in the stage configuration blocks,
+especially:
 
-- `PROJECT_DIR`, `INPUT_DIR`, and `TABULAR_DIR`
-- `NOTE_LINK_PATH`
+- `PROJECT_DIR`
 - llama.cpp server path
 - Hugging Face model/cache paths
 - Slurm resources and email address
@@ -68,6 +69,31 @@ Run the wrappers with `bash`, not `sbatch`: each wrapper is a submission
 controller that calls `sbatch` for its own stages. It prints the model
 configuration first and the complete dependency chain after all stage jobs
 have been submitted.
+
+### Source data paths
+
+Every wrapper currently specifies the same three source paths:
+
+```text
+notes:      /data/grimalditersans/mimic_uid_data/i2m4_n30_notes/
+structured: /data/grimalditersans/mimic_uid_data/i2m4_n30_tabular/
+note link:  /data/grimalditersans/mimic_uid_data/note_link_i2m4.csv
+```
+
+Edit `WRAPPER_NOTES_DIR`, `WRAPPER_STRUCTURED_DIR`, and `WRAPPER_NOTE_LINK` in
+the wrappers to change their hard-coded defaults. For a one-off run, override
+them on the command line:
+
+```bash
+bash submit.sh \
+  --notes-dir /data/my_dataset/notes/ \
+  --structured-dir /data/my_dataset/tabular/ \
+  --note-link /data/my_dataset/note_link.csv
+```
+
+The wrapper exports these values to every applicable Slurm stage. Related
+ablation runs should use the same source paths as their prerequisite standard
+run.
 
 ### Model aliases and output paths
 

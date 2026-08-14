@@ -19,6 +19,9 @@ Model options:
   --reasoning-model-path PATH    Set only the reasoning model path
   --instruct-model-alias NAME    Set only the instruct model alias
   --reasoning-model-alias NAME   Set only the reasoning model alias
+  --notes-dir DIR                Folder containing source note files
+  --structured-dir DIR           Folder containing structured .csv.gz files
+  --note-link FILE               Note/admission mapping CSV
   --output-name NAME             Write beneath PROJECT_DIR/outputs/NAME
   --output-dir DIR               Use an explicit output directory
   --help                         Show this help
@@ -51,6 +54,9 @@ configure_model_submission() {
     REASONING_MODEL_ALIAS="${REASONING_MODEL_ALIAS:-$DEFAULT_MODEL_ALIAS}"
     MODEL_OUTPUT_NAME="${MODEL_OUTPUT_NAME:-}"
     MODEL_OUTPUT_DIR="${MODEL_OUTPUT_DIR:-}"
+    INPUT_DIR="${INPUT_DIR:-}"
+    TABULAR_DIR="${TABULAR_DIR:-}"
+    NOTE_LINK_PATH="${NOTE_LINK_PATH:-}"
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -84,6 +90,21 @@ configure_model_submission() {
             --reasoning-model-alias)
                 require_model_option_value "$1" "${2:-}"
                 REASONING_MODEL_ALIAS="$2"
+                shift 2
+                ;;
+            --notes-dir)
+                require_model_option_value "$1" "${2:-}"
+                INPUT_DIR="$2"
+                shift 2
+                ;;
+            --structured-dir|--tabular-dir)
+                require_model_option_value "$1" "${2:-}"
+                TABULAR_DIR="$2"
+                shift 2
+                ;;
+            --note-link)
+                require_model_option_value "$1" "${2:-}"
+                NOTE_LINK_PATH="$2"
                 shift 2
                 ;;
             --output-name)
@@ -125,6 +146,7 @@ configure_model_submission() {
     export INSTRUCT_MODEL_PATH REASONING_MODEL_PATH
     export INSTRUCT_MODEL_ALIAS REASONING_MODEL_ALIAS
     export MODEL_OUTPUT_NAME MODEL_OUTPUT_DIR
+    export INPUT_DIR TABULAR_DIR NOTE_LINK_PATH
 
     printf 'Model configuration:\n'
     printf '  instruct: %s (%s)\n' "$INSTRUCT_MODEL_PATH" "$INSTRUCT_MODEL_ALIAS"
@@ -134,6 +156,10 @@ configure_model_submission() {
     else
         printf '  output directory: PROJECT_DIR/outputs/%s\n' "$MODEL_OUTPUT_NAME"
     fi
+    printf 'Source data:\n'
+    printf '  notes: %s\n' "$INPUT_DIR"
+    printf '  structured: %s\n' "$TABULAR_DIR"
+    printf '  note link: %s\n' "$NOTE_LINK_PATH"
 }
 
 submit_model_job() {

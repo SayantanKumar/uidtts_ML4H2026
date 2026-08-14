@@ -33,10 +33,10 @@ export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
 export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-qwen35}}"
 
 # Original per-patient tabular data.
-export TABULAR_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n30_tabular"
+export TABULAR_DIR="${TABULAR_DIR:-/data/grimalditersans/mimic_uid_data/i2m4_n30_tabular/}"
 
 # note_id/hadm_id/admittime/dischtime mappings.
-export NOTE_LINK_PATH="/data/grimalditersans/mimic_uid_data/note_link_i2m4.csv"
+export NOTE_LINK_PATH="${NOTE_LINK_PATH:-/data/grimalditersans/mimic_uid_data/note_link_i2m4.csv}"
 
 export BUNDLE_DIR="$OUTPUT_DIR/bundle"
 

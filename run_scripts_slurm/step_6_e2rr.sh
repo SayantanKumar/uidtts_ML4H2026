@@ -58,7 +58,7 @@ SELECTED_INPUT_FILES=(
 
 # File with note_id/hadm_id/admittime/dischtime mappings.
 # Must match the file used in Step 5.
-export NOTE_LINK_PATH="/data/grimalditersans/mimic_uid_data/note_link_i2m4.csv"
+export NOTE_LINK_PATH="${NOTE_LINK_PATH:-/data/grimalditersans/mimic_uid_data/note_link_i2m4.csv}"
 
 export LLAMA_SERVER="/data/grimalditersans/llama.cpp/build-cuda-gcc11/bin/llama-server"
 export LLAMA_LOG_DIR="$OUTPUT_DIR/logs"

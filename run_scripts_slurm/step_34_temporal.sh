@@ -46,8 +46,7 @@ export no_proxy="$NO_PROXY"
 export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
 export SERVER_UTILS="$PROJECT_DIR/llm_server_utils.sh"
 
-#export INPUT_DIR="/data/CHARM-MIMIC/grimalditersans/LLM_pratice/Textual_tabular_alignment-main/atp_tts/data/i2m4/notes"
-export INPUT_DIR="/data/CHARM-MIMIC/grimalditersans/LLM_pratice/Textual_tabular_alignment-main/multimodal_simple/new_annotations/files" #  what is this?
+export INPUT_DIR="${INPUT_DIR:-/data/grimalditersans/mimic_uid_data/i2m4_n30_notes/}"
 
 # Run either every completed Step 1/2 case or only the hard-coded subset below.
 # Use the original input filenames or bare case ids.

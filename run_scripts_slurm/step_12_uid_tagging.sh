@@ -48,7 +48,7 @@ export REPO_ROOT="/data/CHARM-MIMIC/grimalditersans/LLM_pratice/Textual_tabular_
 export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
 export SERVER_UTILS="$PROJECT_DIR/llm_server_utils.sh"
 
-export INPUT_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n30_notes/"
+export INPUT_DIR="${INPUT_DIR:-/data/grimalditersans/mimic_uid_data/i2m4_n30_notes/}"
 #export INPUT_DIR="/data/grimalditersans/LLM_pratice/sample_case_reports/"  # what is this?
 
 # Run either every .txt file in INPUT_DIR or only the hard-coded subset below.
