@@ -27,11 +27,11 @@ structured evidence, and admission/discharge context.
 
 | Variant | What changes | Submission wrapper | Final timeline directory |
 |---|---|---|---|
-| Standard | Full anchor-query retrieval and UID-aware final revision | `submit.sh` | `outputs/<model-output-name>/timelines/` |
-| Blind | Uses standard retrieval, but hides matched row timestamps/events/values and admission/discharge context from the Step 6 reasoner | `submit_blind.sh` | `outputs/<model-output-name>/timelines_blind/` |
-| E2RR | Replaces anchor-query matching in Steps 5D-5E with direct event-to-row retrieval and reranking | `submit_e2rr.sh` | `outputs/<model-output-name>/timelines_e2rr/` |
-| No UID | Uses standard retrieval, but removes UID fields and tags from the Step 6 model input; a fail-closed audit checks for UID leakage | `submit_nouid.sh` | `outputs/<model-output-name>/timelines_nouid/` |
-| No Reranker | Keeps anchor-query retrieval, but ranks candidates only by embedding cosine similarity and skips the reranker model | `submit_noranker.sh` | `outputs/<model-output-name>/timelines_noranker/` |
+| Standard | Full anchor-query retrieval and UID-aware final revision | `submit.sh` | `outputs/<output-name>/timelines/` |
+| Blind | Uses standard retrieval, but hides matched row timestamps/events/values and admission/discharge context from the Step 6 reasoner | `submit_blind.sh` | `outputs/<output-name>/timelines_blind/` |
+| E2RR | Replaces anchor-query matching in Steps 5D-5E with direct event-to-row retrieval and reranking | `submit_e2rr.sh` | `outputs/<output-name>/timelines_e2rr/` |
+| No UID | Uses standard retrieval, but removes UID fields and tags from the Step 6 model input; a fail-closed audit checks for UID leakage | `submit_nouid.sh` | `outputs/<output-name>/timelines_nouid/` |
+| No Reranker | Keeps anchor-query retrieval, but ranks candidates only by embedding cosine similarity and skips the reranker model | `submit_noranker.sh` | `outputs/<output-name>/timelines_noranker/` |
 
 E2RR uses `row_match_ranker_hf.py` and `join_row_with_source_timed.py`. The
 No Reranker variant uses `anchor_match_noranker_hf.py`, followed by the standard
@@ -64,6 +64,28 @@ repository root. With no model arguments, they retain the Qwen 3.5 defaults:
 bash submit.sh
 ```
 
+Run the wrappers with `bash`, not `sbatch`: each wrapper is a submission
+controller that calls `sbatch` for its own stages. It prints the model
+configuration first and the complete dependency chain after all stage jobs
+have been submitted.
+
+### Model aliases and output paths
+
+The model alias has two roles: it is the model name sent to llama-server, and
+by default it is also the output-folder name. For example:
+
+```text
+model alias: qwen35_2
+output root: $PROJECT_DIR/outputs/qwen35_2/
+```
+
+The standard and ablation wrappers must resolve to the same output root so the
+ablations can reuse prerequisite artifacts. Therefore, use the same alias for
+the full pipeline and every related ablation. Ablations keep the shared root
+and write to separate subfolders such as `timelines_blind/`, `timelines_e2rr/`,
+`timelines_nouid/`, and `timelines_noranker/`; they do not change the root
+folder name.
+
 To select a different GGUF model, pass its path and a short alias. The alias is
 also used for the output folder, so this example writes beneath
 `outputs/glm52/`:
@@ -88,15 +110,18 @@ bash submit.sh \
 That example writes beneath `outputs/instruct7b-to-reasoner70b/`. Use
 `--output-name NAME` to choose another folder under `PROJECT_DIR/outputs`, or
 `--output-dir DIR` to provide the complete output path. Run any wrapper with
-`--help` for the complete option list.
+`--help` for the complete option list. If either output override is used, pass
+the same override to all related ablation wrappers.
 
-To run an ablation instead:
+For example, this standard run and all four ablations share
+`outputs/qwen35_2/`:
 
 ```bash
-bash submit_blind.sh --model-path /data/models/model.gguf --model-alias mymodel
-bash submit_e2rr.sh --model-path /data/models/model.gguf --model-alias mymodel
-bash submit_nouid.sh --model-path /data/models/model.gguf --model-alias mymodel
-bash submit_noranker.sh --model-path /data/models/model.gguf --model-alias mymodel
+bash submit.sh --model-alias qwen35_2
+bash submit_blind.sh --model-alias qwen35_2
+bash submit_e2rr.sh --model-alias qwen35_2
+bash submit_nouid.sh --model-alias qwen35_2
+bash submit_noranker.sh --model-alias qwen35_2
 ```
 
 The standard wrapper runs Steps 1-6 and post-processing. E2RR and No Reranker
@@ -130,11 +155,12 @@ The pipeline expects:
 
 ## Main Outputs
 
-For a single model alias, artifacts are written beneath
-`outputs/<model-alias>/`. The default remains `outputs/qwen35/`:
+Unless overridden with `--output-name` or `--output-dir`, artifacts are written
+beneath `outputs/<model-alias>/`. The hard-coded default remains
+`outputs/qwen35/`:
 
 ```text
-outputs/<model-output-name>/
+outputs/<output-name>/
   tagged/                                  tagged notes
   tags/                                    uid4 mention tables
   temporal/answers/                        initial temporal tables
