@@ -34,6 +34,7 @@ run_scripts_glm/
 run_scripts_gpt/
 run_scripts_minimax/
 run_scripts_mistral/
+run_scripts_qwen/
 run_pipeline.sh
 test_multi_llama.sh
 test_multi_vllm.sh

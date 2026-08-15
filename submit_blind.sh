@@ -10,8 +10,8 @@ source "$WRAPPER_DIR/submit_model_utils.sh"
 
 WRAPPER_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf"
 WRAPPER_MODEL_ALIAS="qwen35"
-WRAPPER_NOTES_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n30_notes/"
-WRAPPER_STRUCTURED_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n30_tabular/"
+WRAPPER_NOTES_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n40_notes/"
+WRAPPER_STRUCTURED_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n40_filtered_time/"
 WRAPPER_NOTE_LINK="/data/grimalditersans/mimic_uid_data/note_link_i2m4.csv"
 configure_model_submission "$(basename "$0")" \
     --model-path "$WRAPPER_MODEL_PATH" \
