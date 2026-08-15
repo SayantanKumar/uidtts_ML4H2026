@@ -71,7 +71,7 @@ export STEP3_TAG_CHUNK_SIZE=60
 export LLAMA_SERVER="/data/grimalditersans/llama.cpp/build-cuda-gcc11/bin/llama-server"
 export LLAMA_LOG_DIR="$OUTPUT_DIR/logs"
 
-export CUDA_DEVICES="0,1"
+export CUDA_DEVICES="${LLM_CUDA_DEVICES:-0,1}"
 export LLAMA_TIMEOUT=1200
 
 # Model roles. Wrapper-provided values take precedence over these Qwen defaults.

@@ -22,6 +22,8 @@ Model options:
   --notes-dir DIR                Folder containing source note files
   --structured-dir DIR           Folder containing structured .csv.gz files
   --note-link FILE               Note/admission mapping CSV
+  --gpu-type TYPE                Slurm GPU type for LLM jobs
+  --gpu-count N                  Number of GPUs for LLM jobs
   --output-name NAME             Write beneath PROJECT_DIR/outputs/NAME
   --output-dir DIR               Use an explicit output directory
   --help                         Show this help
@@ -57,6 +59,8 @@ configure_model_submission() {
     INPUT_DIR="${INPUT_DIR:-}"
     TABULAR_DIR="${TABULAR_DIR:-}"
     NOTE_LINK_PATH="${NOTE_LINK_PATH:-}"
+    LLM_GPU_TYPE="${LLM_GPU_TYPE:-a100}"
+    LLM_GPU_COUNT="${LLM_GPU_COUNT:-2}"
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -107,6 +111,16 @@ configure_model_submission() {
                 NOTE_LINK_PATH="$2"
                 shift 2
                 ;;
+            --gpu-type)
+                require_model_option_value "$1" "${2:-}"
+                LLM_GPU_TYPE="$2"
+                shift 2
+                ;;
+            --gpu-count)
+                require_model_option_value "$1" "${2:-}"
+                LLM_GPU_COUNT="$2"
+                shift 2
+                ;;
             --output-name)
                 require_model_option_value "$1" "${2:-}"
                 MODEL_OUTPUT_NAME="$2"
@@ -143,10 +157,29 @@ configure_model_submission() {
         exit 2
     fi
 
+    if [[ ! "$LLM_GPU_TYPE" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        echo "Invalid GPU type: $LLM_GPU_TYPE" >&2
+        exit 2
+    fi
+    if [[ ! "$LLM_GPU_COUNT" =~ ^[1-9][0-9]*$ ]]; then
+        echo "GPU count must be a positive integer: $LLM_GPU_COUNT" >&2
+        exit 2
+    fi
+
+    LLM_CUDA_DEVICES=""
+    local gpu_index
+    for ((gpu_index = 0; gpu_index < LLM_GPU_COUNT; gpu_index++)); do
+        if [[ -n "$LLM_CUDA_DEVICES" ]]; then
+            LLM_CUDA_DEVICES+=","
+        fi
+        LLM_CUDA_DEVICES+="$gpu_index"
+    done
+
     export INSTRUCT_MODEL_PATH REASONING_MODEL_PATH
     export INSTRUCT_MODEL_ALIAS REASONING_MODEL_ALIAS
     export MODEL_OUTPUT_NAME MODEL_OUTPUT_DIR
     export INPUT_DIR TABULAR_DIR NOTE_LINK_PATH
+    export LLM_GPU_TYPE LLM_GPU_COUNT LLM_CUDA_DEVICES
 
     printf 'Model configuration:\n'
     printf '  instruct: %s (%s)\n' "$INSTRUCT_MODEL_PATH" "$INSTRUCT_MODEL_ALIAS"
@@ -160,11 +193,22 @@ configure_model_submission() {
     printf '  notes: %s\n' "$INPUT_DIR"
     printf '  structured: %s\n' "$TABULAR_DIR"
     printf '  note link: %s\n' "$NOTE_LINK_PATH"
+    printf 'LLM GPU resources:\n'
+    printf '  Slurm GRES: gpu:%s:%s\n' "$LLM_GPU_TYPE" "$LLM_GPU_COUNT"
+    printf '  CUDA devices: %s\n' "$LLM_CUDA_DEVICES"
 }
 
 submit_model_job() {
     local job_id
 
     job_id=$(sbatch --parsable --export=ALL "$@")
+    printf '%s\n' "${job_id%%;*}"
+}
+
+submit_llm_job() {
+    local job_id
+
+    job_id=$(sbatch --parsable --export=ALL \
+        --gres="gpu:${LLM_GPU_TYPE}:${LLM_GPU_COUNT}" "$@")
     printf '%s\n' "${job_id%%;*}"
 }

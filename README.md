@@ -75,8 +75,8 @@ have been submitted.
 Every wrapper currently specifies the same three source paths:
 
 ```text
-notes:      /data/grimalditersans/mimic_uid_data/i2m4_n30_notes/
-structured: /data/grimalditersans/mimic_uid_data/i2m4_n30_tabular/
+notes:      /data/grimalditersans/mimic_uid_data/i2m4_n40_notes/
+structured: /data/grimalditersans/mimic_uid_data/i2m4_n40_filtered_time/
 note link:  /data/grimalditersans/mimic_uid_data/note_link_i2m4.csv
 ```
 
@@ -94,6 +94,26 @@ bash submit.sh \
 The wrapper exports these values to every applicable Slurm stage. Related
 ablation runs should use the same source paths as their prerequisite standard
 run.
+
+### LLM GPU resources
+
+Each wrapper defines the GPU type and count used by llama-server jobs:
+
+```bash
+WRAPPER_GPU_TYPE="a100"
+WRAPPER_GPU_COUNT=4
+```
+
+These values override the corresponding `#SBATCH --gres` directive for Steps
+1-2, 3-4, 5B, and 6. The CUDA device list is derived automatically, so a count
+of four produces `CUDA_DEVICES=0,1,2,3`. Embedding and reranking stages retain
+their smaller stage-specific GPU requests.
+
+For a one-off resource override, use:
+
+```bash
+bash submit.sh --gpu-type a100 --gpu-count 4
+```
 
 ### Model aliases and output paths
 
@@ -183,7 +203,7 @@ The pipeline expects:
 
 Unless overridden with `--output-name` or `--output-dir`, artifacts are written
 beneath `outputs/<model-alias>/`. The hard-coded default remains
-`outputs/qwen35/`:
+`outputs/qwen35_2/`:
 
 ```text
 outputs/<output-name>/

@@ -60,7 +60,7 @@ export SERVER_UTILS="$PROJECT_DIR/llm_server_utils.sh"
 export ANCHOR_QUERY_SCRIPT="$PROJECT_DIR/anchor_query_generator.py"
 
 export LLAMA_SERVER="/data/grimalditersans/llama.cpp/build-cuda-gcc11/bin/llama-server"
-export CUDA_DEVICES="0,1"
+export CUDA_DEVICES="${LLM_CUDA_DEVICES:-0,1}"
 export LLAMA_TIMEOUT=1200
 export PORT=8081
 
