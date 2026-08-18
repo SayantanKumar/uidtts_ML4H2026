@@ -39,3 +39,5 @@ run_pipeline.sh
 test_multi_llama.sh
 test_multi_vllm.sh
 test_iter.sh
+run_all_multinode.sh
+submit_end.sh

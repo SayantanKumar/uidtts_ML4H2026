@@ -60,7 +60,12 @@ def get_discharge_time_with_buffer(note_adms_df, hadm_id, buffer_hours=12):
     
     try:
         # Use pandas to parse - handles ISO 8601 with timezone (e.g., "2180-05-07T17:15:00Z")
-        dischtime = pd.to_datetime(dischtime_str)
+        dischtime = parse_mixed_timestamps(
+            pd.Series([dischtime_str])
+        ).iloc[0]
+
+        if pd.isna(dischtime):
+            return None
 
         # Normalize to timezone-naive for comparison
         # If timezone-aware, convert to UTC then remove timezone info
@@ -170,29 +175,22 @@ def join_row_with_source(row_results_file: Path, summary_mapping_file: Path,
     
     # Parse timestamps in line_level_df - handle both ISO 8601 and Unix epoch
     if 't' in line_level_df.columns:
-        # First try parsing as ISO 8601 strings
-        line_level_df['timestamp'] = pd.to_datetime(line_level_df['t'], errors='coerce')
+        line_level_df["timestamp"] = parse_mixed_timestamps(
+            line_level_df["t"]
+        )
 
-        # Check if timestamps look reasonable (not all in 1970)
-        # If most timestamps are in 1970, they're probably Unix epoch seconds, not ISO dates
-        min_timestamp = line_level_df['timestamp'].min()
-        if pd.notna(min_timestamp) and min_timestamp.year < 2000:
-            # Probably Unix epoch seconds, re-parse with unit='s'
-            line_level_df['timestamp'] = pd.to_datetime(line_level_df['t'], unit='s', errors='coerce')
+        bad = line_level_df["t"].notna() & line_level_df["timestamp"].isna()
+        if bad.any():
+            print("Warning: unparseable timestamp values:")
+            print(line_level_df.loc[bad, "t"].head(20).tolist())
 
-        # For any remaining NaT values, try alternate parsing
-        mask = line_level_df['timestamp'].isna()
-        if mask.any():
-            line_level_df.loc[mask, 'timestamp'] = pd.to_datetime(
-                line_level_df.loc[mask, 't'], unit='s', errors='coerce'
-            )
-
-        # Ensure timestamps are timezone-naive for comparison
-        # If timezone-aware, convert to UTC then remove timezone info
-        if line_level_df['timestamp'].dt.tz is not None:
-            line_level_df['timestamp'] = line_level_df['timestamp'].dt.tz_convert('UTC').dt.tz_localize(None)
+        line_level_df["timestamp"] = (
+            line_level_df["timestamp"]
+            .dt.tz_convert("UTC")
+            .dt.tz_localize(None)
+        )
     else:
-        print("Warning: 't' column not found in line-level data for timestamp parsing")
+        print("Warning: 't' column not found in line-level data")
     
     expanded_rows = []
     
@@ -252,6 +250,46 @@ def join_row_with_source(row_results_file: Path, summary_mapping_file: Path,
     expanded_df.to_csv(output_file, index=False)
     
     return expanded_df
+
+def parse_mixed_timestamps(values: pd.Series) -> pd.Series:
+    raw = values.astype("string").str.strip()
+
+    output = pd.Series(
+        pd.NaT,
+        index=values.index,
+        dtype="datetime64[ns, UTC]",
+    )
+
+    valid = raw.notna() & raw.ne("")
+    numeric = pd.to_numeric(raw, errors="coerce")
+    numeric_mask = valid & numeric.notna()
+    magnitude = numeric.abs()
+
+    unit_masks = {
+        "s": numeric_mask & magnitude.lt(1e11),
+        "ms": numeric_mask & magnitude.ge(1e11) & magnitude.lt(1e14),
+        "us": numeric_mask & magnitude.ge(1e14) & magnitude.lt(1e17),
+        "ns": numeric_mask & magnitude.ge(1e17),
+    }
+
+    for unit, mask in unit_masks.items():
+        output.loc[mask] = pd.to_datetime(
+            numeric.loc[mask],
+            unit=unit,
+            origin="unix",
+            errors="coerce",
+            utc=True,
+        )
+
+    date_mask = valid & ~numeric_mask
+    output.loc[date_mask] = pd.to_datetime(
+        raw.loc[date_mask],
+        format="mixed",
+        errors="coerce",
+        utc=True,
+    )
+
+    return output
 
 def main():
     parser = argparse.ArgumentParser(description="Join row results with source tabular data")
