@@ -35,13 +35,11 @@ start_server() {
 
     sleep 5
 
-    #local url="http://localhost:${port}/v1/chat/completions"
-    local url="http://127.0.0.1:${port}/v1/chat/completions"
+    local url="http://127.0.0.1:${port}/health"
 
     local start_time
     start_time=$(date +%s)
     local timeout=${LLAMA_TIMEOUT:-300}
-    local health_prompt="ping"
 
     echo "Waiting for llama-server to be ready..."
     local attempts=0
@@ -58,38 +56,18 @@ start_server() {
 
         # capture body + status on separate lines
         local raw
-        
-        #raw=$(timeout 10 curl -s -w '\n%{http_code}' -X POST "$url" \
-        raw=$(timeout 10 curl --noproxy "localhost,127.0.0.1,::1" -s -w '\n%{http_code}' -X POST "$url" \
-            -H "Content-Type: application/json" \
-            -d "{
-                \"model\": \"default\",
-                \"messages\":[{\"role\":\"user\",\"content\":\"$health_prompt\"}],
-                \"max_tokens\": 16
-            }" 2>/dev/null || echo -e "\n000")
+        raw=$(timeout 10 curl \
+            --noproxy "localhost,127.0.0.1,::1" \
+            -sS -w '\n%{http_code}' \
+            "$url" 2>/dev/null || printf '\n000')
 
         local http_code body
         http_code=${raw##*$'\n'}
         body=${raw%$'\n'$http_code}
 
-        # basic ready condition: HTTP 200 + non-empty body
-        if [[ "$http_code" == "200" && -n "$body" ]]; then
-            # try to extract content if this is OpenAI-style JSON
-            local content trimmed
-            content=$(echo "$body" | jq -r '.choices[0].message.content // empty' 2>/dev/null || echo "")
-            trimmed=$(echo "$content" | xargs)
-
-            # if jq works and we got a real answer, optionally require != prompt
-            if [[ -n "$trimmed" && "$trimmed" != "null" && "$trimmed" != "$health_prompt" ]]; then
-                echo "llama-server is fully ready (content: '$trimmed')"
-                break
-            fi
-
-            # fallback: treat as ready if body is non-empty even if jq failed
-            if [[ -z "$content" ]]; then
-                echo "llama-server is fully ready (non-empty body, jq failed or different schema)"
-                break
-            fi
+        if [[ "$http_code" == "200" ]]; then
+            echo "llama-server is fully ready"
+            break
         fi
 
         if (( attempts % 10 == 0 )); then
