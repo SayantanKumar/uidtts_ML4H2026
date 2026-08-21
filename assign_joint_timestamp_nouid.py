@@ -82,6 +82,19 @@ def collect_known_uid4s(anchor_file: Path, case_report_file: Path,
 
     return known
 
+def remove_known_uid4s(text: str, known_uid4s: Set[str]) -> str:
+    """Remove known patient UID4 values, including untagged occurrences."""
+    known = {uid.lower() for uid in known_uid4s}
+
+    return UID4_TOKEN_RE.sub(
+        lambda match: (
+            "[REMOVED]"
+            if match.group(1).lower() in known
+            else match.group(0)
+        ),
+        str(text),
+    )
+
 def audit_model_input(rendered_messages: List[Dict[str, Any]],
                       known_uid4s: Set[str],
                       log_file: Optional[Path] = None) -> None:
@@ -615,6 +628,19 @@ Output format:
                 "Each timeline must contain 'timeline_id', 'data', and 'reasoning'."
             )
         })
+
+        # Remove tagged or untagged known UID4 values from everything
+        # that is about to be sent to the model.
+        messages = [
+            {
+                **message,
+                "content": remove_known_uid4s(
+                    message["content"],
+                    known_uid4s or set(),
+                ),
+            }
+            for message in messages
+        ]
 
         try:
             prompt = ChatPromptTemplate.from_messages(messages)
