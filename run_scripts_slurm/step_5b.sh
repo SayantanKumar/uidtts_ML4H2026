@@ -1,9 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=uid_step5b
-#SBATCH --time=2-00:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --mem=128g
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:a100:2
+#SBATCH --qos=gpunlm2025.2
 #SBATCH --output=sbatch_output/slurm_%j.out
 #SBATCH --error=sbatch_error/slurm_%j.err
 #SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
@@ -43,7 +44,7 @@ export no_proxy="$NO_PROXY"
 ###############################################################################
 
 export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
-export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-qwen35}}"
+export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-single_case_qwen}}"
 
 # Step 5A input directory.
 export BUNDLE_DIR="$OUTPUT_DIR/bundle"
@@ -77,8 +78,8 @@ export AQG_MAX_QUERIES_PER_UID=3
 
 export FILE_SELECTION_MODE="all"  # all|subset
 SELECTED_INPUT_FILES=(
-    # "11121324.txt"
-    # "11649157.txt"
+    # "11121324"
+    # "11649157"
 )
 
 export SELECTION_WORK_DIR="$OUTPUT_DIR/selection_work"
@@ -200,6 +201,17 @@ fi
 # Step 5B: generate anchor queries
 ###############################################################################
 
+# DeepSeek V3.2 workaround for llama.cpp PEG-native parsing failure.
+case "$(basename "$INSTRUCT_MODEL_PATH")" in
+    DeepSeek-V3.2-*)
+        export LLAMA_ARG_SKIP_CHAT_PARSING=true
+        ;;
+    *)
+        unset LLAMA_ARG_SKIP_CHAT_PARSING
+        ;;
+esac
+
+log "Skip chat parsing: ${LLAMA_ARG_SKIP_CHAT_PARSING:-false}"
 log "Starting llama-server"
 start_server \
     "$REASONING_MODEL_PATH" \

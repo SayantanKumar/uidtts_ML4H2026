@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=uid_step5a
-#SBATCH --time=2-00:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --mem=128g
 #SBATCH --output=sbatch_output/slurm_%j.out
 #SBATCH --error=sbatch_error/slurm_%j.err
@@ -30,7 +30,7 @@ conda activate /data/grimalditersans/mymamba/envs/TTA
 ###############################################################################
 
 export PROJECT_DIR="/data/grimalditersans/uid_anchor_detection"
-export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-qwen35}}"
+export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-single_case_qwen}}"
 
 export TAGGED_DIR="$OUTPUT_DIR/tagged"
 export TAGS_DIR="$OUTPUT_DIR/tags"
@@ -45,8 +45,8 @@ export MASK_SCRIPT="$PROJECT_DIR/mask_cr_append_mt.py"
 # Run all completed cases or only the listed subset.
 export FILE_SELECTION_MODE="all"  # all|subset
 SELECTED_INPUT_FILES=(
-    # "11121324.txt"
-    # "11649157.txt"
+    # "11121324"
+    # "11649157"
 )
 
 export SELECTION_WORK_DIR="$OUTPUT_DIR/selection_work"

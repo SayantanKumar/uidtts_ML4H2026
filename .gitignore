@@ -41,3 +41,6 @@ test_multi_vllm.sh
 test_iter.sh
 run_all_multinode.sh
 submit_end.sh
+submit_end_noranker.sh
+submit_end_e2rr.sh
+submit_glm_5c.sh

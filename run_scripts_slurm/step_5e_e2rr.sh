@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=uid_step5e
-#SBATCH --time=2-00:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --mem=128g
 #SBATCH --output=sbatch_output/slurm_%j.out
 #SBATCH --error=sbatch_error/slurm_%j.err
@@ -62,8 +62,8 @@ export STEP5_JOIN_LOG="$LOG_DIR/step5e_e2rr.log"
 
 export FILE_SELECTION_MODE="all"  # all|subset
 SELECTED_INPUT_FILES=(
-    # "11121324.txt"
-    # "11649157.txt"
+    # "11121324"
+    # "11649157"
 )
 
 export PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}"

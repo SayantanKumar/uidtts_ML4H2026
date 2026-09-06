@@ -1,9 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=uid_step5d
-#SBATCH --time=2-00:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --mem=128g
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:a100:1
+#SBATCH --qos=gpunlm2025.2
 #SBATCH --output=sbatch_output/slurm_%j.out
 #SBATCH --error=sbatch_error/slurm_%j.err
 #SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
@@ -88,8 +89,8 @@ export TOP_K=10
 
 export FILE_SELECTION_MODE="all"  # all|subset
 SELECTED_INPUT_FILES=(
-    # "11121324.txt"
-    # "11649157.txt"
+    # "11121324"
+    # "11649157"
 )
 
 export SELECTION_WORK_DIR="$OUTPUT_DIR/selection_work"
@@ -271,13 +272,20 @@ validated_count=0
 # done
 
 validated_count=0
+skipped_count=0
 
-for timeline_file in "${timeline_files[@]}"; do
-    case_name="$(basename "$timeline_file" .bsv.gz)"
+for anchor_json in "${anchor_jsons[@]}"; do
+    case_name="$(basename "$anchor_json")"
+    case_name="${case_name%.json}"
+    case_name="${case_name%.txt}"
+
     results_file="$COMPARISON_DIR/${case_name}_results.json"
 
-    has_nonblank_content "$results_file" ||
-        die "Missing or empty Step 5D result: $results_file"
+    if ! has_nonblank_content "$results_file"; then
+        log "WARNING: Missing or empty Step 5D result; skipping: $results_file"
+        skipped_count=$((skipped_count + 1))
+        continue
+    fi
 
     python -m json.tool "$results_file" >/dev/null ||
         die "Invalid Step 5D result JSON: $results_file"
@@ -287,5 +295,6 @@ done
 
 log "Step 5D complete"
 log "Validated comparison results: $validated_count"
+log "Skipped cases without results: $skipped_count"
 log "Output for Step 5E: $COMPARISON_DIR"
 log "Ranker log: $STEP5_RANK_LOG"

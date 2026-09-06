@@ -9,7 +9,6 @@
 #SBATCH --error=sbatch_error/slurm_%A_%a.err
 #SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
 #SBATCH --mail-user=grimalditersans@nih.gov
-a
 # Submit from the folder containing this script:
 #   mkdir -p sbatch_output sbatch_error
 #   sbatch step67.sh

@@ -21,12 +21,14 @@ start_server() {
         -t 16 \
         -ngl 999 \
         -n 72000 \
+        --reasoning on \
+        --chat-template-kwargs '{"thinking_mode":"thinking"}' \
         --ctx-size 72000 \
         -np 1 \
         --temp 0.6 \
         --port "$port" \
         --jinja > "$log_file" 2>&1 &
-        
+                
         # \
         # >> "$log_file" 2>&1 &
 

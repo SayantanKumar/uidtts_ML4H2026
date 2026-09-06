@@ -2,8 +2,6 @@
 #SBATCH --job-name=uid_post
 #SBATCH --time=12:00:00
 #SBATCH --mem=32g
-#SBATCH --partition=gpu
-#SBATCH --gres=gpu:a100:2
 #SBATCH --output=sbatch_output/slurm_%A_%a.out
 #SBATCH --error=sbatch_error/slurm_%A_%a.err
 #SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
@@ -46,8 +44,8 @@ export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:
 # Use the original input filenames or bare case ids.
 export FILE_SELECTION_MODE="all"  # all|subset
 SELECTED_INPUT_FILES=(
-    # "11121324.txt"
-    # "11649157.txt"
+    # "11121324"
+    # "11649157"
 )
 
 export AQG_INFIX="uidtts"

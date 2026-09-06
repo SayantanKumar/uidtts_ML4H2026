@@ -1,9 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=uid_step34
-#SBATCH --time=2-00:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --mem=32g
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:a100:2
+#SBATCH --qos=gpunlm2025.2
 #SBATCH --output=sbatch_output/slurm_%A_%a.out
 #SBATCH --error=sbatch_error/slurm_%A_%a.err
 #SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
@@ -51,12 +52,15 @@ export INPUT_DIR="${INPUT_DIR:-/data/grimalditersans/mimic_uid_data/i2m4_n30_not
 # Run either every completed Step 1/2 case or only the hard-coded subset below.
 # Use the original input filenames or bare case ids.
 export FILE_SELECTION_MODE="all"  # all|subset
-SELECTED_INPUT_FILES=("11121324.txt","11649157.txt", "103859.txt", "11083378.txt")
+SELECTED_INPUT_FILES=(
+    # "11121324" 
+    # "11649157"
+)
 
 # Must match the Step 12 output directory because Step 34 reads
 # "$OUTPUT_DIR/tagged" and "$OUTPUT_DIR/tags".
 #export OUTPUT_DIR="$PROJECT_DIR/outputs"
-export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-qwen35}}"
+export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-single_case_qwen}}"
 
 # Set to "txt.gz" if INPUT_DIR contains compressed reports.
 export INPUT_TYPE="txt"
@@ -445,6 +449,17 @@ validate_step12_outputs
 
 prepare_step3_inputs "$SELECTION_WORK_DIR/step3_valid_${SLURM_JOB_ID:-manual}_$$"
 
+# DeepSeek V3.2 workaround for llama.cpp PEG-native parsing failure.
+case "$(basename "$INSTRUCT_MODEL_PATH")" in
+    DeepSeek-V3.2-*)
+        export LLAMA_ARG_SKIP_CHAT_PARSING=true
+        ;;
+    *)
+        unset LLAMA_ARG_SKIP_CHAT_PARSING
+        ;;
+esac
+
+log "Skip chat parsing: ${LLAMA_ARG_SKIP_CHAT_PARSING:-false}"
 log "Starting llama-server for Step 3"
 start_server "$REASONING_MODEL_PATH" "$REASONING_MODEL_ALIAS" "$PORT"
 

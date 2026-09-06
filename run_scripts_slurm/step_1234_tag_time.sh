@@ -4,6 +4,7 @@
 #SBATCH --mem=32g
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:a100:2
+#SBATCH --qos=gpunlm2025.2
 #SBATCH --output=sbatch_output/slurm_%A_%a.out
 #SBATCH --error=sbatch_error/slurm_%A_%a.err
 #SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END

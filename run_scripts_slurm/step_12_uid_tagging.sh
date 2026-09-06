@@ -1,9 +1,10 @@
 #!/bin/bash
 #SBATCH --job-name=uid_step12
-#SBATCH --time=2-00:00:00
+#SBATCH --time=1-00:00:00
 #SBATCH --mem=32g
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:a100:2
+#SBATCH --qos=gpunlm2025.2
 #SBATCH --output=sbatch_output/slurm_%A_%a.out
 #SBATCH --error=sbatch_error/slurm_%A_%a.err
 #SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
@@ -56,11 +57,11 @@ export INPUT_DIR="${INPUT_DIR:-/data/grimalditersans/mimic_uid_data/i2m4_n30_not
 # INPUT_DIR. You may also list bare case ids, e.g. "11121324".
 export FILE_SELECTION_MODE="all"  # all|subset
 SELECTED_INPUT_FILES=(
-    # "11121324.txt"
-    # "11649157.txt"
+    # "11121324"
+    # "11649157"
 )
 
-export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-qwen35}}"
+export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:-single_case_qwen}}"
 # export OUTPUT_DIR="/data/CHARM-MIMIC/grimalditersans/LLM_pratice/sample_annotations/"  # what is this?
 
 # Set to "txt.gz" if INPUT_DIR contains compressed reports.
@@ -83,10 +84,10 @@ export LLAMA_TIMEOUT=1200
 
 # Model roles. Wrapper-provided values take precedence over these Qwen defaults.
 export INSTRUCT_MODEL_PATH="${INSTRUCT_MODEL_PATH:-/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf}"
-export INSTRUCT_MODEL_ALIAS="${INSTRUCT_MODEL_ALIAS:-qwen35}"
+export INSTRUCT_MODEL_ALIAS="${INSTRUCT_MODEL_ALIAS:-single_case_qwen}"
 
 export REASONING_MODEL_PATH="${REASONING_MODEL_PATH:-/data/CHARM-MIMIC/.cache/huggingface/gguf/Qwen3.5-397B-A17B-UD-IQ2_M-00001-of-00004.gguf}"
-export REASONING_MODEL_ALIAS="${REASONING_MODEL_ALIAS:-qwen35}"
+export REASONING_MODEL_ALIAS="${REASONING_MODEL_ALIAS:-single_case_qwen}"
 export PORT=8080
 
 # Leave empty unless the llama-server model needs extra OpenAI body options.
@@ -183,7 +184,17 @@ log "Port: $PORT"
 ###############################################################################
 # Step 1: tag clinical event mentions
 ###############################################################################
+# DeepSeek V3.2 workaround for llama.cpp PEG-native parsing failure.
+case "$(basename "$INSTRUCT_MODEL_PATH")" in
+    DeepSeek-V3.2-*)
+        export LLAMA_ARG_SKIP_CHAT_PARSING=true
+        ;;
+    *)
+        unset LLAMA_ARG_SKIP_CHAT_PARSING
+        ;;
+esac
 
+log "Skip chat parsing: ${LLAMA_ARG_SKIP_CHAT_PARSING:-false}"
 log "Starting llama-server for Step 1"
 start_server "$INSTRUCT_MODEL_PATH" "$INSTRUCT_MODEL_ALIAS" "$PORT"
 
