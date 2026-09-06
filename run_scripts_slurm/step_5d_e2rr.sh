@@ -274,10 +274,8 @@ validated_count=0
 validated_count=0
 skipped_count=0
 
-for anchor_json in "${anchor_jsons[@]}"; do
-    case_name="$(basename "$anchor_json")"
-    case_name="${case_name%.json}"
-    case_name="${case_name%.txt}"
+for timeline_file in "${timeline_files[@]}"; do
+    case_name="$(basename "$timeline_file" .bsv.gz)"
 
     results_file="$COMPARISON_DIR/${case_name}_results.json"
 
@@ -292,6 +290,9 @@ for anchor_json in "${anchor_jsons[@]}"; do
 
     validated_count=$((validated_count + 1))
 done
+
+[[ "$validated_count" -gt 0 ]] ||
+    die "No valid Step 5D E2RR result files found in $COMPARISON_DIR"
 
 log "Step 5D complete"
 log "Validated comparison results: $validated_count"

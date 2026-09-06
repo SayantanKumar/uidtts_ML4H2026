@@ -101,7 +101,7 @@ export COMPARISON_DIR="$BUNDLE_DIR/$AQG_INFIX/e2rr_comparison_results"
 ASSIGN_TIMESTAMPS_SCRIPT="$PROJECT_DIR/assign_joint_timestamp_noquery.py"
 
 STEP6_LOG="$LLAMA_LOG_DIR/assign_joint_timestamp_noquery.log"
-STEP6_RETRY_LOG_DIR="$LLAMA_LOG_DIR/step6_retries"
+STEP6_RETRY_LOG_DIR="$LLAMA_LOG_DIR/step6_retries_e2rr"
 
 export PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}"
 
@@ -370,7 +370,7 @@ joined_files=("$COMPARISON_DIR"/*_joined.csv)
 filter_selected_files_in_place joined_files
 timeline_count=0
 failed_timeline_count=0
-STEP6_FAILED_CASES="$LLAMA_LOG_DIR/step6_failed_cases.txt"
+STEP6_FAILED_CASES="$LLAMA_LOG_DIR/step6_failed_cases_e2rr.txt"
 : > "$STEP6_FAILED_CASES"
 
 for joined_file in "${joined_files[@]}"; do

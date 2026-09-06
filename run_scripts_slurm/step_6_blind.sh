@@ -102,7 +102,7 @@ export TIMELINE_OUTPUT_DIR="$BUNDLE_DIR/$AQG_INFIX/blind_comparison_results"
 ASSIGN_TIMESTAMPS_SCRIPT="$PROJECT_DIR/assign_joint_timestamp_blind.py"
 
 STEP6_LOG="$LLAMA_LOG_DIR/assign_joint_timestamp_blind.log"
-STEP6_RETRY_LOG_DIR="$LLAMA_LOG_DIR/step6_retries"
+STEP6_RETRY_LOG_DIR="$LLAMA_LOG_DIR/step6_retries_blind"
 
 export PYTHONPATH="$PROJECT_DIR:${PYTHONPATH:-}"
 
@@ -371,7 +371,7 @@ summary_files=("$COMPARISON_DIR"/*_summary.csv)
 filter_selected_files_in_place summary_files
 timeline_count=0
 failed_timeline_count=0
-STEP6_FAILED_CASES="$LLAMA_LOG_DIR/step6_failed_cases.txt"
+STEP6_FAILED_CASES="$LLAMA_LOG_DIR/step6_failed_cases_blind.txt"
 : > "$STEP6_FAILED_CASES"
 
 for summary_file in "${summary_files[@]}"; do
