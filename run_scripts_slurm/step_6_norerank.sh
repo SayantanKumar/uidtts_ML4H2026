@@ -51,7 +51,7 @@ export OUTPUT_DIR="${MODEL_OUTPUT_DIR:-$PROJECT_DIR/outputs/${MODEL_OUTPUT_NAME:
 
 # Run either every completed Step 5 case or only the hard-coded subset below.
 # Use the original input filenames or bare case ids.
-export FILE_SELECTION_MODE="subset"  # all|subset
+export FILE_SELECTION_MODE="all"  # all|subset
 SELECTED_INPUT_FILES=(
     # "11121324"
     # "11649157"

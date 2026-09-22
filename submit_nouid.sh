@@ -9,7 +9,7 @@ SCRIPT_DIR="$WRAPPER_DIR/run_scripts_slurm"
 source "$WRAPPER_DIR/submit_model_utils.sh"
 
 WRAPPER_MODEL_PATH="/data/CHARM-MIMIC/.cache/huggingface/gguf/DeepSeek-V3.2-UD-IQ2_M-00001-of-00005.gguf"
-WRAPPER_MODEL_ALIAS="DeepSeekV3.2"
+WRAPPER_MODEL_ALIAS="dsk_32"
 WRAPPER_NOTES_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n40_notes/"
 WRAPPER_STRUCTURED_DIR="/data/grimalditersans/mimic_uid_data/i2m4_n40_filtered_time/"
 WRAPPER_NOTE_LINK="/data/grimalditersans/mimic_uid_data/note_link_i2m4.csv"

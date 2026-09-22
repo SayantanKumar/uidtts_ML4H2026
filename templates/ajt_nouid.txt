@@ -38,12 +38,12 @@ Output format:
   "timelines": [
     {{{{
       "timeline_id": "timeline_1",
-      "data": "mention|time|bounds|known|example mention|-48|[-72,-24]|1|another mention|24|[12,48]|0|",
+      "data": "mention|time|bounds|known\nexample mention|-48|[-72,-24]|1\nanother mention|24|[12,48]|0",
       "reasoning": "why this timeline is plausible"
     }}}},
     {{{{
       "timeline_id": "timeline_2",
-      "data": "mention|time|bounds|known|example mention|-24|[-48,0]|1|another mention|48|[24,72]|0|",
+      "data": "mention|time|bounds|known\nexample mention|-24|[-48,0]|1\nanother mention|48|[24,72]|0",
       "reasoning": "why this alternate timeline is plausible"
     }}}}
   ]

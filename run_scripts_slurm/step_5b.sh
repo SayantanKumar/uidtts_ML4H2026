@@ -57,7 +57,7 @@ export AQG_DIR="$BUNDLE_DIR/$AQG_INFIX"
 export LLAMA_LOG_DIR="$OUTPUT_DIR/logs"
 export STEP5_AQG_LOG="$LLAMA_LOG_DIR/step5b_anchor_query_generator.log"
 
-export SERVER_UTILS="$PROJECT_DIR/llm_server_utils.sh"
+export SERVER_UTILS="$PROJECT_DIR/llm_server_utils_noreasoning.sh"
 export ANCHOR_QUERY_SCRIPT="$PROJECT_DIR/anchor_query_generator.py"
 
 export LLAMA_SERVER="/data/grimalditersans/llama.cpp/build-cuda-gcc11/bin/llama-server"
@@ -142,7 +142,7 @@ mkdir -p "$AQG_DIR" "$LLAMA_LOG_DIR" "$SELECTION_WORK_DIR"
 
 check_path "$PROJECT_DIR" "project directory"
 check_path "$BUNDLE_DIR" "Step 5A bundle directory"
-check_path "$SERVER_UTILS" "llm_server_utils.sh"
+check_path "$SERVER_UTILS" "llm_server_utils_noreasoning.sh"
 check_path "$LLAMA_SERVER" "llama-server binary"
 check_path "$REASONING_MODEL_PATH" "reasoning model"
 check_path "$AQG_SYSTEM_PROMPT" "anchor-query system prompt"
