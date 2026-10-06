@@ -158,6 +158,27 @@ def flexible_occurrences(text: str, mention: str) -> list[tuple[int, int]]:
     return [(m.start(), m.end()) for m in re.finditer(pattern, text, re.IGNORECASE)]
 
 
+def align_spans_to_source(spans: list[Span], source_text: str) -> tuple[list[Span], int]:
+    """Relocate generated tagged spans into the original source report."""
+    aligned: list[Span] = []
+    used: set[tuple[int, int]] = set()
+    cursor = 0
+    missing = 0
+    for span in spans:
+        candidates = flexible_occurrences(source_text, span.mention)
+        available = [candidate for candidate in candidates if candidate not in used]
+        choice = next((candidate for candidate in available if candidate[0] >= cursor), None)
+        if choice is None and available:
+            choice = available[0]
+        if choice is None:
+            missing += 1
+            continue
+        used.add(choice)
+        cursor = max(cursor, choice[1])
+        aligned.append(Span(span.uid4, choice[0], choice[1], source_text[choice[0]:choice[1]]))
+    return aligned, missing
+
+
 def load_timeline(path: Path) -> tuple[list[str], list[dict[str, str]]]:
     with open_text(path) as handle:
         rows = list(csv.reader(handle, delimiter="|"))
@@ -274,6 +295,11 @@ def main() -> int:
     )
     parser.add_argument("output_root", type=Path, help="Pipeline output root (for example outputs/glm5.2)")
     parser.add_argument("--bundle-dir", type=Path, help="Tagged reports and *_uid4.bsv files")
+    parser.add_argument(
+        "--source-dir",
+        type=Path,
+        help="Original TXT/TXT.GZ reports whose character coordinate system should be used",
+    )
     parser.add_argument("--timeline-dir", type=Path, help="Optional BSV/BSV.GZ timelines to join")
     parser.add_argument("--output-dir", type=Path, help="Destination (default: BUNDLE/charpos)")
     parser.add_argument("--pattern", default="*.txt*", help="Bundle report glob (default: *.txt*)")
@@ -285,6 +311,7 @@ def main() -> int:
     bundle = (args.bundle_dir or root / "bundle").resolve()
     destination = (args.output_dir or bundle / "charpos").resolve()
     timeline_dir = args.timeline_dir.resolve() if args.timeline_dir else None
+    source_dir = args.source_dir.resolve() if args.source_dir else None
     if timeline_dir is None:
         for candidate in (root / "timelines", root / "timelines_final"):
             if candidate.is_dir() and any(candidate.glob("*.bsv*")):
@@ -293,6 +320,8 @@ def main() -> int:
 
     if not bundle.is_dir():
         parser.error(f"bundle directory does not exist: {bundle}")
+    if source_dir is not None and not source_dir.is_dir():
+        parser.error(f"source directory does not exist: {source_dir}")
     destination.mkdir(parents=True, exist_ok=True)
 
     reports = [
@@ -302,13 +331,31 @@ def main() -> int:
     if not reports:
         parser.error(f"no reports matching {args.pattern!r} in {bundle}")
 
-    files_written = found_total = missing_total = 0
+    files_written = found_total = missing_total = source_errors = 0
     for report in reports:
         uid_files = find_related(bundle, report, ("*_uid4.bsv", "*_uid4.bsv.gz"))
         uid_file = uid_files[0] if uid_files else None
         ordered_uids, mention_map = load_uid_table(uid_file)
         with open_text(report) as handle:
             clean_text, spans = extract_spans(handle.read(), ordered_uids)
+
+        coordinate_text = clean_text
+        alignment_missing = 0
+        if source_dir is not None:
+            source_files = find_related(source_dir, report, ("*.txt", "*.txt.gz"))
+            if not source_files:
+                print(f"ERROR: no original source report found for {report.name}", file=sys.stderr)
+                source_errors += 1
+                continue
+            with open_text(source_files[0]) as handle:
+                coordinate_text = handle.read()
+            spans, alignment_missing = align_spans_to_source(spans, coordinate_text)
+            if alignment_missing:
+                print(
+                    f"WARNING: {report.name}: {alignment_missing} tagged mentions "
+                    "could not be aligned to the original report",
+                    file=sys.stderr,
+                )
 
         timelines = (
             find_related(timeline_dir, report, ("*.bsv", "*.bsv.gz"))
@@ -322,16 +369,18 @@ def main() -> int:
                 print(f"skip existing: {target}")
                 continue
             found, missing = (
-                write_joined(target, timeline, clean_text, spans)
+                write_joined(target, timeline, coordinate_text, spans)
                 if timeline else write_raw(target, spans, mention_map)
             )
+            if timeline is None:
+                missing += alignment_missing
             print(f"wrote {target} ({found} positioned, {missing} missing)")
             files_written += 1
             found_total += found
             missing_total += missing
 
     print(f"done: {files_written} files, {found_total} positioned rows, {missing_total} missing rows")
-    if args.strict and missing_total:
+    if source_errors or (args.strict and missing_total):
         return 1
     return 0
 

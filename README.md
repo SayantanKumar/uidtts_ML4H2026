@@ -243,10 +243,15 @@ markup, replaces header-only outputs automatically, and joins a `timelines/` or
 
 ```bash
 python postprocess_char_positions.py outputs/glm5.2 \
+  --source-dir /path/to/original/reports \
   --timeline-dir outputs/glm5.2/timelines_final \
   --output-dir outputs/glm5.2/bundle/charpos \
   --overwrite --strict
 ```
+
+Use `--source-dir` whenever offsets must refer to the original input reports.
+Without it, offsets refer to the model-generated bundle text after tags are
+removed, whose headings or whitespace may differ from the source documents.
 
 ## Script Layout
 
