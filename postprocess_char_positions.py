@@ -25,10 +25,11 @@ from typing import Iterable, TextIO
 
 
 TAG_RE = re.compile(
-    r"<(?P<tag>[0-9a-fA-F]{4}|tag_(?P<number>\d+))(?:\s[^>]*)?>"
+    r"<(?P<tag>[0-9a-fA-F]{4}|tag_(?P<number>\d+))(?P<attrs>\s[^>]*)?>"
     r"(?P<content>.*?)</(?P=tag)\s*>",
     re.DOTALL | re.IGNORECASE,
 )
+MENTION_ATTR_RE = re.compile(r"\bmention\s*=\s*([\"'])(.*?)\1", re.DOTALL | re.IGNORECASE)
 SUBJECT_ID_RE = re.compile(r"(?<!\d)\d{5,}(?!\d)")
 
 
@@ -114,12 +115,20 @@ def load_uid_table(path: Path | None) -> tuple[list[str], dict[str, str]]:
     return ordered, mentions
 
 
-def extract_spans(text: str, numbered_uids: list[str]) -> tuple[str, list[Span]]:
+def normalized_mention(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip().casefold()
+
+
+def extract_spans(text: str, mention_map: dict[str, str]) -> tuple[str, list[Span]]:
     """Remove paired tags and return spans in the resulting plain text."""
     clean_parts: list[str] = []
     spans: list[Span] = []
     source_cursor = 0
     clean_cursor = 0
+    mention_uids: dict[str, list[str]] = {}
+    for uid4, mention in mention_map.items():
+        mention_uids.setdefault(normalized_mention(mention), []).append(uid4)
+    used_numbered_uids: set[str] = set()
 
     for match in TAG_RE.finditer(text):
         prefix = text[source_cursor:match.start()]
@@ -136,9 +145,26 @@ def extract_spans(text: str, numbered_uids: list[str]) -> tuple[str, list[Span]]
         number = match.group("number")
         if number is None:
             uid4 = match.group("tag").lower()
+            used_numbered_uids.add(uid4)
         else:
-            index = int(number) - 1
-            uid4 = numbered_uids[index] if 0 <= index < len(numbered_uids) else f"tag_{number}"
+            # Tag numbers may have gaps and do not necessarily correspond to
+            # row positions in *_uid4.bsv. Match the tag's declared mention
+            # (or its verbatim content) instead of using number - 1.
+            attr_match = MENTION_ATTR_RE.search(match.group("attrs") or "")
+            lookup_values = []
+            if attr_match:
+                lookup_values.append(normalized_mention(attr_match.group(2)))
+            lookup_values.append(normalized_mention(content))
+            uid4 = f"tag_{number}"
+            for value in lookup_values:
+                candidate = next(
+                    (uid for uid in mention_uids.get(value, []) if uid not in used_numbered_uids),
+                    None,
+                )
+                if candidate is not None:
+                    uid4 = candidate
+                    used_numbered_uids.add(candidate)
+                    break
 
         clean_parts.append(content)
         clean_cursor += len(content)
@@ -337,9 +363,9 @@ def main() -> int:
     for report in reports:
         uid_files = find_related(bundle, report, ("*_uid4.bsv", "*_uid4.bsv.gz"))
         uid_file = uid_files[0] if uid_files else None
-        ordered_uids, mention_map = load_uid_table(uid_file)
+        _, mention_map = load_uid_table(uid_file)
         with open_text(report) as handle:
-            clean_text, spans = extract_spans(handle.read(), ordered_uids)
+            clean_text, spans = extract_spans(handle.read(), mention_map)
 
         coordinate_text = clean_text
         alignment_missing = 0
