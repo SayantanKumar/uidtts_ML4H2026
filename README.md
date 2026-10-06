@@ -228,6 +228,26 @@ character-position tables that link timeline events back to mention spans.
 Treat notes, model-input logs, joined evidence, and outputs as protected
 clinical data.
 
+### Standalone character-position post-processing
+
+To create or repair character-position tables without rerunning the pipeline:
+
+```bash
+python postprocess_char_positions.py outputs/glm5.2
+```
+
+The script reads tagged reports and `*_uid4.bsv` mappings from `bundle/`, then
+writes tables to `bundle/charpos/`. It recognizes both `<uid4>` and `<tag_N>`
+markup, replaces header-only outputs automatically, and joins a `timelines/` or
+`timelines_final/` directory when one exists. To choose paths explicitly:
+
+```bash
+python postprocess_char_positions.py outputs/glm5.2 \
+  --timeline-dir outputs/glm5.2/timelines_final \
+  --output-dir outputs/glm5.2/bundle/charpos \
+  --overwrite --strict
+```
+
 ## Script Layout
 
 - `run_scripts_slurm/`: current stepwise pipeline and ablation scripts
