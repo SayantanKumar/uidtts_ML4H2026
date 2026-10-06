@@ -46,6 +46,12 @@ def open_text(path: Path) -> TextIO:
     return path.open("r", encoding="utf-8", newline="")
 
 
+def open_output(path: Path) -> TextIO:
+    if path.suffix == ".gz":
+        return gzip.open(path, "wt", encoding="utf-8", newline="")
+    return path.open("w", encoding="utf-8", newline="")
+
+
 def case_base(path: Path) -> str:
     name = path.name
     while True:
@@ -193,11 +199,19 @@ def choose_span(
 def has_position_rows(path: Path) -> bool:
     """Return True only when an existing table contains a populated span."""
     try:
-        with path.open("r", encoding="utf-8", newline="") as handle:
-            for row in csv.reader(handle, delimiter="|"):
-                if len(row) >= 3 and row[1].strip().isdigit() and row[2].strip().isdigit():
+        with open_text(path) as handle:
+            reader = csv.reader(handle, delimiter="|")
+            header = [column.strip().lower() for column in next(reader, [])]
+            start_index = header.index("char_pos")
+            end_index = header.index("char_pos_ub")
+            for row in reader:
+                if (
+                    len(row) > max(start_index, end_index)
+                    and row[start_index].strip().isdigit()
+                    and row[end_index].strip().isdigit()
+                ):
                     return True
-    except (OSError, UnicodeError):
+    except (OSError, UnicodeError, ValueError):
         pass
     return False
 
@@ -217,26 +231,33 @@ def write_raw(path: Path, spans: list[Span], mention_map: dict[str, str]) -> tup
 
 def write_joined(path: Path, timeline: Path, text: str, spans: list[Span]) -> tuple[int, int]:
     header, rows = load_timeline(timeline)
+    normalized = {column.strip().lower(): column for column in header}
+    uid_key = normalized.get("uid4", header[0])
+    mention_key = normalized.get("mention", "mention")
+    output_header = list(header)
+    insert_at = output_header.index(uid_key) + 1
+    if "char_pos" not in normalized:
+        output_header.insert(insert_at, "char_pos")
+        insert_at += 1
+    if "char_pos_ub" not in normalized:
+        output_header.insert(insert_at, "char_pos_ub")
+
     tagged: dict[str, list[Span]] = {}
     for span in spans:
         tagged.setdefault(span.uid4.lower(), []).append(span)
     used: set[tuple[int, int]] = set()
     found = 0
 
-    with path.open("w", encoding="utf-8", newline="") as handle:
+    with open_output(path) as handle:
         writer = csv.writer(handle, delimiter="|", lineterminator="\n")
-        writer.writerow(["uid4", "char_pos", "char_pos_ub", *header[1:]])
+        writer.writerow(output_header)
         for row in rows:
-            uid4 = row.get(header[0], "").strip()
-            mention_key = next((key for key in header if key.strip().lower() == "mention"), "mention")
+            uid4 = row.get(uid_key, "").strip()
             start, end = choose_span(uid4, row.get(mention_key, ""), tagged, text, used)
             found += start is not None
-            writer.writerow([
-                uid4,
-                "" if start is None else start,
-                "" if end is None else end,
-                *(row.get(column, "") for column in header[1:]),
-            ])
+            row[normalized.get("char_pos", "char_pos")] = "" if start is None else str(start)
+            row[normalized.get("char_pos_ub", "char_pos_ub")] = "" if end is None else str(end)
+            writer.writerow([row.get(column, "") for column in output_header])
     return found, len(rows) - found
 
 
@@ -244,9 +265,7 @@ def output_name(report: Path, timeline: Path | None) -> str:
     base = case_base(report)
     if timeline is None:
         return f"{base}_positions.bsv"
-    match = re.search(r"_timeline_(\d+)", timeline.name)
-    index = match.group(1) if match else "1"
-    return f"{base}_positions_timeline_{index}.bsv"
+    return timeline.name
 
 
 def main() -> int:
