@@ -230,16 +230,30 @@ def choose_span(
     text: str,
     used: set[tuple[int, int]],
 ) -> tuple[int | None, int | None]:
-    for span in tagged.get(uid4.lower(), []):
-        key = (span.start, span.end)
-        if key not in used:
-            used.add(key)
-            return key
+    # Prefer the row's own mention text. UID mappings are generated upstream
+    # and can be shifted or otherwise inconsistent with numbered tags.
     candidates = flexible_occurrences(text, mention)
     for candidate in candidates:
         if candidate not in used:
             used.add(candidate)
             return candidate
+
+    mention_norm = normalized_mention(mention)
+    for span in tagged.get(uid4.lower(), []):
+        span_norm = normalized_mention(span.mention)
+        compatible = bool(
+            mention_norm
+            and span_norm
+            and (
+                mention_norm == span_norm
+                or mention_norm in span_norm
+                or span_norm in mention_norm
+            )
+        )
+        key = (span.start, span.end)
+        if compatible and key not in used:
+            used.add(key)
+            return key
     return None, None
 
 
