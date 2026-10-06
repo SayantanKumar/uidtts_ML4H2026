@@ -115,11 +115,34 @@ def load_uid_table(path: Path | None) -> tuple[list[str], dict[str, str]]:
     return ordered, mentions
 
 
+def load_tag_table(path: Path | None) -> tuple[dict[str, str], dict[str, str]]:
+    """Load authoritative tag_number -> uid4 and uid4 -> mention mappings."""
+    tag_uids: dict[str, str] = {}
+    mentions: dict[str, str] = {}
+    if path is None:
+        return tag_uids, mentions
+    with open_text(path) as handle:
+        for row in csv.reader(handle, delimiter="|"):
+            if len(row) < 3:
+                continue
+            tag_number = row[0].strip().lower().removeprefix("tag_")
+            uid4 = row[1].strip().lower()
+            if not tag_number.isdigit() or not re.fullmatch(r"[0-9a-f]{4}", uid4):
+                continue
+            tag_uids[tag_number] = uid4
+            mentions[uid4] = row[2].strip()
+    return tag_uids, mentions
+
+
 def normalized_mention(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().casefold()
 
 
-def extract_spans(text: str, mention_map: dict[str, str]) -> tuple[str, list[Span]]:
+def extract_spans(
+    text: str,
+    mention_map: dict[str, str],
+    tag_uid_map: dict[str, str] | None = None,
+) -> tuple[str, list[Span]]:
     """Remove paired tags and return spans in the resulting plain text."""
     clean_parts: list[str] = []
     spans: list[Span] = []
@@ -150,21 +173,23 @@ def extract_spans(text: str, mention_map: dict[str, str]) -> tuple[str, list[Spa
             # Tag numbers may have gaps and do not necessarily correspond to
             # row positions in *_uid4.bsv. Match the tag's declared mention
             # (or its verbatim content) instead of using number - 1.
-            attr_match = MENTION_ATTR_RE.search(match.group("attrs") or "")
-            lookup_values = []
-            if attr_match:
-                lookup_values.append(normalized_mention(attr_match.group(2)))
-            lookup_values.append(normalized_mention(content))
-            uid4 = f"tag_{number}"
-            for value in lookup_values:
-                candidate = next(
-                    (uid for uid in mention_uids.get(value, []) if uid not in used_numbered_uids),
-                    None,
-                )
-                if candidate is not None:
-                    uid4 = candidate
-                    used_numbered_uids.add(candidate)
-                    break
+            uid4 = (tag_uid_map or {}).get(number, f"tag_{number}")
+            if uid4.startswith("tag_"):
+                attr_match = MENTION_ATTR_RE.search(match.group("attrs") or "")
+                lookup_values = []
+                if attr_match:
+                    lookup_values.append(normalized_mention(attr_match.group(2)))
+                lookup_values.append(normalized_mention(content))
+                for value in lookup_values:
+                    candidate = next(
+                        (uid for uid in mention_uids.get(value, []) if uid not in used_numbered_uids),
+                        None,
+                    )
+                    if candidate is not None:
+                        uid4 = candidate
+                        break
+            if not uid4.startswith("tag_"):
+                used_numbered_uids.add(uid4)
 
         clean_parts.append(content)
         clean_cursor += len(content)
@@ -342,6 +367,11 @@ def main() -> int:
         type=Path,
         help="Original TXT/TXT.GZ reports whose character coordinate system should be used",
     )
+    parser.add_argument(
+        "--tag-map-dir",
+        type=Path,
+        help="Authoritative *_tags.bsv[.gz] directory (default: OUTPUT_ROOT/tags when present)",
+    )
     parser.add_argument("--timeline-dir", type=Path, help="Optional BSV/BSV.GZ timelines to join")
     parser.add_argument("--output-dir", type=Path, help="Destination (default: BUNDLE/charpos)")
     parser.add_argument("--pattern", default="*.txt*", help="Bundle report glob (default: *.txt*)")
@@ -354,6 +384,7 @@ def main() -> int:
     destination = (args.output_dir or bundle / "charpos").resolve()
     timeline_dir = args.timeline_dir.resolve() if args.timeline_dir else None
     source_dir = args.source_dir.resolve() if args.source_dir else None
+    tag_map_dir = args.tag_map_dir.resolve() if args.tag_map_dir else root / "tags"
     if timeline_dir is None:
         for candidate in (root / "timelines", root / "timelines_final"):
             if candidate.is_dir() and any(candidate.glob("*.bsv*")):
@@ -378,8 +409,14 @@ def main() -> int:
         uid_files = find_related(bundle, report, ("*_uid4.bsv", "*_uid4.bsv.gz"))
         uid_file = uid_files[0] if uid_files else None
         _, mention_map = load_uid_table(uid_file)
+        tag_files = (
+            find_related(tag_map_dir, report, ("*_tags.bsv", "*_tags.bsv.gz"))
+            if tag_map_dir.is_dir() else []
+        )
+        tag_uid_map, tag_mentions = load_tag_table(tag_files[0] if tag_files else None)
+        mention_map.update(tag_mentions)
         with open_text(report) as handle:
-            clean_text, spans = extract_spans(handle.read(), mention_map)
+            clean_text, spans = extract_spans(handle.read(), mention_map, tag_uid_map)
 
         coordinate_text = clean_text
         alignment_missing = 0
