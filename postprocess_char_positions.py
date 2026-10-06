@@ -276,8 +276,10 @@ def write_joined(path: Path, timeline: Path, text: str, spans: list[Span]) -> tu
             uid4 = row.get(uid_key, "").strip()
             start, end = choose_span(uid4, row.get(mention_key, ""), tagged, text, used)
             found += start is not None
-            row[normalized.get("char_pos", "char_pos")] = "" if start is None else str(start)
-            row[normalized.get("char_pos_ub", "char_pos_ub")] = "" if end is None else str(end)
+            # The timeline reviewer uses ``--`` as its nullable-integer token;
+            # an empty field is passed to int("") and crashes during loading.
+            row[normalized.get("char_pos", "char_pos")] = "--" if start is None else str(start)
+            row[normalized.get("char_pos_ub", "char_pos_ub")] = "--" if end is None else str(end)
             writer.writerow([row.get(column, "") for column in output_header])
     return found, len(rows) - found
 
