@@ -12,7 +12,12 @@ import argparse
 import csv
 import gzip
 import json
+import os
 import re
+import shlex
+import shutil
+import signal
+import subprocess
 import sys
 import time
 import urllib.error
@@ -134,6 +139,100 @@ def ensure_local_endpoint(base_url: str, allow_remote: bool) -> None:
             "Refusing to send a clinical note to a non-local endpoint. "
             "Use --allow-remote-endpoint only for an approved private endpoint."
         )
+
+
+def health_url(base_url: str) -> str:
+    parsed = urllib.parse.urlparse(base_url)
+    return urllib.parse.urlunparse((parsed.scheme, parsed.netloc, "/health", "", "", ""))
+
+
+def server_is_healthy(base_url: str) -> bool:
+    try:
+        with urllib.request.urlopen(health_url(base_url), timeout=2) as response:
+            return 200 <= response.status < 300
+    except (urllib.error.URLError, TimeoutError):
+        return False
+
+
+def allocated_gpu_count() -> int:
+    value = os.environ.get("SLURM_GPUS_ON_NODE", "")
+    return int(value) if value.isdigit() and int(value) > 0 else 1
+
+
+def start_vllm_server(
+    base_url: str,
+    model_path: Path,
+    served_model_name: str,
+    tensor_parallel_size: int,
+    startup_timeout: int,
+    extra_args: str,
+    log_path: Path,
+) -> tuple[subprocess.Popen[bytes] | None, TextIO | None]:
+    """Start a local vLLM server when the requested endpoint is not healthy."""
+    if server_is_healthy(base_url):
+        print(f"using existing model server at {base_url}", file=sys.stderr)
+        return None, None
+
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise ValueError("automatic server startup requires a loopback --base-url")
+    if not model_path.is_dir():
+        raise ValueError(f"model directory does not exist: {model_path}")
+    vllm = shutil.which("vllm")
+    if not vllm:
+        raise ValueError("vllm executable not found in PATH; activate the vLLM environment")
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    command = [
+        vllm,
+        "serve",
+        str(model_path),
+        "--served-model-name",
+        served_model_name,
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--tensor-parallel-size",
+        str(tensor_parallel_size),
+        "--trust-remote-code",
+        *shlex.split(extra_args),
+    ]
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_handle = log_path.open("ab")
+    print(f"starting MiMo server; log={log_path}", file=sys.stderr)
+    process = subprocess.Popen(
+        command,
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + startup_timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            log_handle.close()
+            raise RuntimeError(
+                f"vLLM exited with status {process.returncode}; inspect {log_path}"
+            )
+        if server_is_healthy(base_url):
+            print("MiMo server is ready", file=sys.stderr)
+            return process, log_handle
+        time.sleep(5)
+    stop_vllm_server(process, log_handle)
+    raise TimeoutError(f"vLLM did not become healthy within {startup_timeout}s; inspect {log_path}")
+
+
+def stop_vllm_server(process: subprocess.Popen[bytes], log_handle: TextIO | None) -> None:
+    """Terminate the vLLM process group started by this script."""
+    if process.poll() is None:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.wait(timeout=30)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            if process.poll() is None:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=10)
+    if log_handle and not log_handle.closed:
+        log_handle.close()
 
 
 def query_model(
@@ -290,6 +389,22 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--base-url", default="http://127.0.0.1:8000/v1")
     parser.add_argument("--model", default="mimo-charpos")
+    parser.add_argument(
+        "--model-path",
+        type=Path,
+        default=Path("/data/grimalditersans/models/MiMo-V2.6-Pro-RL/"),
+        help="Local model directory used to start vLLM automatically",
+    )
+    parser.add_argument("--tensor-parallel-size", type=int, default=allocated_gpu_count())
+    parser.add_argument("--startup-timeout", type=int, default=1800)
+    parser.add_argument(
+        "--vllm-extra-args",
+        default="",
+        help="Additional arguments passed to `vllm serve`",
+    )
+    parser.add_argument("--server-log", type=Path)
+    parser.add_argument("--no-start-server", action="store_true")
+    parser.add_argument("--keep-server", action="store_true")
     parser.add_argument("--batch-size", type=int, default=20)
     parser.add_argument("--max-tokens", type=int, default=8192)
     parser.add_argument("--timeout", type=int, default=1800)
@@ -302,6 +417,8 @@ def main() -> int:
 
     if args.batch_size < 1:
         parser.error("--batch-size must be positive")
+    if args.tensor_parallel_size < 1:
+        parser.error("--tensor-parallel-size must be positive")
     for path in (args.timeline, args.note):
         if not path.is_file():
             parser.error(f"file does not exist: {path}")
@@ -319,56 +436,80 @@ def main() -> int:
         )
     ensure_local_endpoint(args.base_url, args.allow_remote_endpoint)
 
-    with open_text(args.note) as handle:
-        note = handle.read()
-    header, rows = read_table(args.timeline)
-    targets = []
-    for index, row in enumerate(rows):
-        existing = current_span(row, note)
-        if args.repair_all or existing is None or not spans_are_compatible(row.get("mention", ""), existing[2]):
-            targets.append(index)
+    server_process: subprocess.Popen[bytes] | None = None
+    server_log_handle: TextIO | None = None
+    server_log = args.server_log or Path(str(args.output) + ".vllm.log")
+    if not args.no_start_server:
+        try:
+            server_process, server_log_handle = start_vllm_server(
+                args.base_url,
+                args.model_path,
+                args.model,
+                args.tensor_parallel_size,
+                args.startup_timeout,
+                args.vllm_extra_args,
+                server_log,
+            )
+        except (ValueError, RuntimeError, TimeoutError) as exc:
+            parser.error(str(exc))
+    elif not server_is_healthy(args.base_url):
+        parser.error(f"no healthy model server at {args.base_url}")
 
-    audit_path = Path(str(args.output) + ".audit.jsonl")
-    repaired = unresolved = 0
-    audit_records: list[dict[str, Any]] = []
-    for batch_number, indices in enumerate(chunks(targets, args.batch_size), start=1):
-        batch_rows = [rows[index] for index in indices]
-        print(f"batch {batch_number}: requesting {len(indices)} spans", file=sys.stderr)
-        response = query_model(
-            build_prompt(note, batch_rows), args.base_url, args.model,
-            args.max_tokens, args.timeout, args.retries,
+    try:
+        with open_text(args.note) as handle:
+            note = handle.read()
+        header, rows = read_table(args.timeline)
+        targets = []
+        for index, row in enumerate(rows):
+            existing = current_span(row, note)
+            if args.repair_all or existing is None or not spans_are_compatible(row.get("mention", ""), existing[2]):
+                targets.append(index)
+
+        audit_path = Path(str(args.output) + ".audit.jsonl")
+        repaired = unresolved = 0
+        audit_records: list[dict[str, Any]] = []
+        for batch_number, indices in enumerate(chunks(targets, args.batch_size), start=1):
+            batch_rows = [rows[index] for index in indices]
+            print(f"batch {batch_number}: requesting {len(indices)} spans", file=sys.stderr)
+            response = query_model(
+                build_prompt(note, batch_rows), args.base_url, args.model,
+                args.max_tokens, args.timeout, args.retries,
+            )
+            suggestions = extract_json_array(response)
+            by_uid = {str(item.get("uid4", "")).strip(): item for item in suggestions}
+            for index in indices:
+                row = rows[index]
+                uid4 = row.get("uid4", "").strip()
+                suggestion = by_uid.get(uid4)
+                resolved = resolve_suggestion(suggestion, note) if suggestion else None
+                record: dict[str, Any] = {"uid4": uid4, "mention": row.get("mention", "")}
+                if resolved is None:
+                    row["char_pos"] = NULL_POSITION
+                    row["char_pos_ub"] = NULL_POSITION
+                    unresolved += 1
+                    record.update({"status": "unresolved", "suggestion": suggestion})
+                else:
+                    start, end, selected = resolved
+                    row["char_pos"] = str(start)
+                    row["char_pos_ub"] = str(end)
+                    repaired += 1
+                    record.update({"status": "repaired", "start": start, "end": end, "text": selected})
+                audit_records.append(record)
+
+        write_table(args.output, header, rows)
+        with audit_path.open("w", encoding="utf-8") as handle:
+            for record in audit_records:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        kept = len(rows) - len(targets)
+        print(
+            f"wrote {args.output}: {repaired} repaired, {kept} kept, {unresolved} unresolved; "
+            f"audit={audit_path}"
         )
-        suggestions = extract_json_array(response)
-        by_uid = {str(item.get("uid4", "")).strip(): item for item in suggestions}
-        for index in indices:
-            row = rows[index]
-            uid4 = row.get("uid4", "").strip()
-            suggestion = by_uid.get(uid4)
-            resolved = resolve_suggestion(suggestion, note) if suggestion else None
-            record: dict[str, Any] = {"uid4": uid4, "mention": row.get("mention", "")}
-            if resolved is None:
-                row["char_pos"] = NULL_POSITION
-                row["char_pos_ub"] = NULL_POSITION
-                unresolved += 1
-                record.update({"status": "unresolved", "suggestion": suggestion})
-            else:
-                start, end, selected = resolved
-                row["char_pos"] = str(start)
-                row["char_pos_ub"] = str(end)
-                repaired += 1
-                record.update({"status": "repaired", "start": start, "end": end, "text": selected})
-            audit_records.append(record)
-
-    write_table(args.output, header, rows)
-    with audit_path.open("w", encoding="utf-8") as handle:
-        for record in audit_records:
-            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-    kept = len(rows) - len(targets)
-    print(
-        f"wrote {args.output}: {repaired} repaired, {kept} kept, {unresolved} unresolved; "
-        f"audit={audit_path}"
-    )
-    return 1 if unresolved else 0
+        return 1 if unresolved else 0
+    finally:
+        if server_process is not None and not args.keep_server:
+            print("stopping MiMo server", file=sys.stderr)
+            stop_vllm_server(server_process, server_log_handle)
 
 
 if __name__ == "__main__":
