@@ -7,9 +7,10 @@ both bundle formats used by this repository:
 * ``<02d2>mention</02d2>`` (UID tags)
 * ``<tag_1 ...>mention</tag_1>`` (numbered tags)
 
-Numbered tags are mapped to UID4 values by row order in the matching
-``*_uid4.bsv`` file.  Offsets refer to the report after markup is removed and
-use Python's usual half-open convention: ``text[char_pos:char_pos_ub]``.
+Numbered tags are mapped to UID4 values with the matching ``*_tags.bsv`` file
+when available, with mention matching as a fallback. Offsets refer to the
+report after markup is removed and use Python's usual half-open convention:
+``text[char_pos:char_pos_ub]``.
 """
 
 from __future__ import annotations
@@ -255,30 +256,22 @@ def choose_span(
     text: str,
     used: set[tuple[int, int]],
 ) -> tuple[int | None, int | None]:
-    # Prefer the row's own mention text. UID mappings are generated upstream
-    # and can be shifted or otherwise inconsistent with numbered tags.
+    # A tag-to-UID mapping identifies the exact occurrence, while the timeline
+    # mention is often normalized (and may occur elsewhere in the report).
+    # Therefore an available UID tag is authoritative for character position.
+    for span in tagged.get(uid4.lower(), []):
+        key = (span.start, span.end)
+        if key not in used:
+            used.add(key)
+            return key
+
+    # Some downstream timelines contain derived rows that were not tagged.
+    # Preserve the previous best-effort behavior for those rows only.
     candidates = flexible_occurrences(text, mention)
     for candidate in candidates:
         if candidate not in used:
             used.add(candidate)
             return candidate
-
-    mention_norm = normalized_mention(mention)
-    for span in tagged.get(uid4.lower(), []):
-        span_norm = normalized_mention(span.mention)
-        compatible = bool(
-            mention_norm
-            and span_norm
-            and (
-                mention_norm == span_norm
-                or mention_norm in span_norm
-                or span_norm in mention_norm
-            )
-        )
-        key = (span.start, span.end)
-        if compatible and key not in used:
-            used.add(key)
-            return key
     return None, None
 
 
