@@ -1,11 +1,11 @@
 #!/bin/bash
 #SBATCH --job-name=mimo_charpos
 #SBATCH --partition=gpu
-#SBATCH --qos=gpunlm2025.2
+#SBATCH --constraint=gpuh200
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:h200:8
+#SBATCH --gres=gpu:8
 #SBATCH --mem=0
 #SBATCH --exclusive
 #SBATCH --time=12:00:00
