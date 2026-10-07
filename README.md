@@ -238,8 +238,9 @@ python postprocess_char_positions.py outputs/glm5.2
 
 The script reads tagged reports and `*_uid4.bsv` mappings from `bundle/`, then
 writes tables to `bundle/charpos/`. It recognizes both `<uid4>` and `<tag_N>`
-markup, uses the authoritative `tags/*_tags.bsv.gz` tag-to-UID mapping when
-available, replaces header-only outputs automatically, and joins a `timelines/` or
+markup, validates `tags/*_tags.bsv.gz` tag-to-UID mappings against the bundle's
+declared mentions (to handle dropped or renumbered tags), replaces header-only
+outputs automatically, and joins a `timelines/` or
 `timelines_final/` directory when one exists. To choose paths explicitly:
 
 ```bash

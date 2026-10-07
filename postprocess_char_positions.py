@@ -140,6 +140,21 @@ def normalized_mention(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().casefold()
 
 
+def mentions_compatible(left: str, right: str) -> bool:
+    """Return whether two normalized mention descriptions can identify one event."""
+    left_norm = normalized_mention(left)
+    right_norm = normalized_mention(right)
+    return bool(
+        left_norm
+        and right_norm
+        and (
+            left_norm == right_norm
+            or left_norm in right_norm
+            or right_norm in left_norm
+        )
+    )
+
+
 def extract_spans(
     text: str,
     mention_map: dict[str, str],
@@ -172,21 +187,40 @@ def extract_spans(
             uid4 = match.group("tag").lower()
             used_numbered_uids.add(uid4)
         else:
-            # Tag numbers may have gaps and do not necessarily correspond to
-            # row positions in *_uid4.bsv. Match the tag's declared mention
-            # (or its verbatim content) instead of using number - 1.
+            attr_match = MENTION_ATTR_RE.search(match.group("attrs") or "")
+            lookup_mentions = []
+            if attr_match:
+                lookup_mentions.append(attr_match.group(2))
+            lookup_mentions.append(content)
+
+            # Some bundles omit an event and renumber the remaining <tag_N>
+            # markup while *_tags.bsv retains the original numbering. Accept
+            # a numbered mapping only when its mention agrees with the actual
+            # bundle tag; otherwise recover the UID by mention.
             uid4 = (tag_uid_map or {}).get(number, f"tag_{number}")
+            mapped_mention = mention_map.get(uid4, "")
+            if uid4 in used_numbered_uids or not any(
+                mentions_compatible(mapped_mention, value) for value in lookup_mentions
+            ):
+                uid4 = f"tag_{number}"
+
             if uid4.startswith("tag_"):
-                attr_match = MENTION_ATTR_RE.search(match.group("attrs") or "")
-                lookup_values = []
-                if attr_match:
-                    lookup_values.append(normalized_mention(attr_match.group(2)))
-                lookup_values.append(normalized_mention(content))
-                for value in lookup_values:
+                candidate = None
+                for value in lookup_mentions:
+                    value_norm = normalized_mention(value)
                     candidate = next(
-                        (uid for uid in mention_uids.get(value, []) if uid not in used_numbered_uids),
+                        (uid for uid in mention_uids.get(value_norm, []) if uid not in used_numbered_uids),
                         None,
                     )
+                    if candidate is None:
+                        candidate = next(
+                            (
+                                uid for uid, candidate_mention in mention_map.items()
+                                if uid not in used_numbered_uids
+                                and mentions_compatible(candidate_mention, value)
+                            ),
+                            None,
+                        )
                     if candidate is not None:
                         uid4 = candidate
                         break

@@ -1,6 +1,11 @@
 import unittest
 
-from postprocess_char_positions import Span, align_spans_to_source, choose_span
+from postprocess_char_positions import (
+    Span,
+    align_spans_to_source,
+    choose_span,
+    extract_spans,
+)
 
 
 class ChooseSpanTests(unittest.TestCase):
@@ -20,6 +25,25 @@ class ChooseSpanTests(unittest.TestCase):
             choose_span("ffff", "timeline mention", {}, text, set()),
             (10, 26),
         )
+
+
+class NumberedTagMappingTests(unittest.TestCase):
+    def test_stale_number_mapping_is_recovered_by_declared_mention(self):
+        text = (
+            '<tag_1 mention="No Known Allergies"> No Known Allergies </tag_1>'
+            '<tag_2 mention="No Adverse Drug Reactions"> Adverse Drug Reactions </tag_2>'
+        )
+        mentions = {
+            "002e": "male",
+            "0065": "No Known Allergies / Adverse Drug Reactions",
+        }
+        stale_tag_map = {"1": "002e", "2": "0065"}
+
+        _, spans = extract_spans(text, mentions, stale_tag_map)
+
+        self.assertEqual(spans[0].uid4, "0065")
+        self.assertEqual(spans[1].uid4, "tag_2")
+        self.assertNotIn("002e", {span.uid4 for span in spans})
 
 
 class SourceAlignmentTests(unittest.TestCase):
