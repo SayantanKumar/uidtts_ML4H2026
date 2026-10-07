@@ -255,6 +255,36 @@ Use `--source-dir` whenever offsets must refer to the original input reports.
 Without it, offsets refer to the model-generated bundle text after tags are
 removed, whose headings or whitespace may differ from the source documents.
 
+### LLM-assisted character-position repair
+
+`repair_char_positions_llm.py` can repair a position table against one original
+note through a locally served OpenAI-compatible model. The model selects exact
+quotes; the script computes and validates the offsets and preserves all other
+BSV columns. Start MiMo with vLLM inside a GPU allocation:
+
+```bash
+vllm serve /data/grimalditersans/models/MiMo-V2.6-Pro-RL/ \
+  --served-model-name mimo-charpos \
+  --host 127.0.0.1 --port 8000 \
+  --tensor-parallel-size 1 --trust-remote-code
+```
+
+Then, in the same allocation, repair a table to a new file:
+
+```bash
+python repair_char_positions_llm.py \
+  --timeline /data/grimalditersans/MLHC_TTA/compare_tts/m4rnd20_batch_output_0001/bundle/charpos/11649157-DS-7_positions_timeline_1.bsv \
+  --note /data/grimalditersans/mimic_uid_data/i2m4_n40_notes/2023-03-31_10-31-14_annotations_162755_yes_structured.txt \
+  --output /data/grimalditersans/MLHC_TTA/compare_tts/m4rnd20_batch_output_0001/bundle/charpos_llm/11649157-DS-7_positions_timeline_1.bsv \
+  --base-url http://127.0.0.1:8000/v1 \
+  --model mimo-charpos
+```
+
+The timeline and note examples above identify different cases; substitute a
+note with the same patient ID as the timeline in an actual run. Add
+`--repair-all` to review every row instead of only missing or implausible spans.
+An adjacent `.audit.jsonl` records every accepted or unresolved repair.
+
 ## Script Layout
 
 - `run_scripts_slurm/`: current stepwise pipeline and ablation scripts
