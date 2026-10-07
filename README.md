@@ -277,6 +277,16 @@ note with the same patient ID as the timeline in an actual run. Add
 `--repair-all` to review every row instead of only missing or implausible spans.
 An adjacent `.audit.jsonl` records every accepted or unresolved repair.
 
+To request one Biowulf node with eight H200 GPUs and run the example end to
+end, submit the included wrapper:
+
+```bash
+sbatch run_scripts_slurm/repair_char_positions_mimo_h200.sh
+```
+
+Set `TIMELINE_FILE`, `NOTE_FILE`, and `OUTPUT_FILE` before `sbatch` to process a
+different matching patient without editing the wrapper.
+
 ## Script Layout
 
 - `run_scripts_slurm/`: current stepwise pipeline and ablation scripts
