@@ -281,6 +281,7 @@ To request one Biowulf `gpuh200` node with all eight GPUs and run the example
 end to end, submit the included wrapper:
 
 ```bash
+mkdir -p sbatch_output sbatch_error
 sbatch run_scripts_slurm/repair_char_positions_mimo_h200.sh
 ```
 

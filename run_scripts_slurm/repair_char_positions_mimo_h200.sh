@@ -1,18 +1,19 @@
 #!/bin/bash
-#SBATCH --job-name=mimo_charpos
-#SBATCH --partition=gpu
-#SBATCH --constraint=gpuh200
+#SBATCH --job-name=mimo_one_prompt
+#SBATCH --time=24:00:00
 #SBATCH --nodes=1
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=32
-#SBATCH --gres=gpu:8
-#SBATCH --mem=0
-#SBATCH --exclusive
-#SBATCH --time=12:00:00
-#SBATCH --output=slurm-%x-%j.out
-#SBATCH --error=slurm-%x-%j.err
+#SBATCH --ntasks-per-node=1
+#SBATCH --cpus-per-task=64
+#SBATCH --mem=1200g
+#SBATCH --partition=gpuh200
+#SBATCH --gres=gpu:h200:8
+#SBATCH --output=sbatch_output/mimo_one_prompt_%j.out
+#SBATCH --error=sbatch_error/mimo_one_prompt_%j.err
+#SBATCH --mail-type=BEGIN,TIME_LIMIT_90,END
+#SBATCH --mail-user=grimalditersans@nih.gov
 
 # Submit with:
+#   mkdir -p sbatch_output sbatch_error
 #   sbatch run_scripts_slurm/repair_char_positions_mimo_h200.sh
 # Override any case path without editing this file, for example:
 #   TIMELINE_FILE=/data/.../case.bsv NOTE_FILE=/data/.../case.txt \
