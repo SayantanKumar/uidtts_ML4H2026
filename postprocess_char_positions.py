@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import difflib
 import gzip
 import re
 import sys
@@ -210,13 +211,87 @@ def flexible_occurrences(text: str, mention: str) -> list[tuple[int, int]]:
     return [(m.start(), m.end()) for m in re.finditer(pattern, text, re.IGNORECASE)]
 
 
-def align_spans_to_source(spans: list[Span], source_text: str) -> tuple[list[Span], int]:
-    """Relocate generated tagged spans into the original source report."""
+def compact_text(text: str) -> tuple[str, list[int], list[int]]:
+    """Return non-whitespace text, source indices, and prefix character counts."""
+    compact: list[str] = []
+    positions: list[int] = []
+    prefix_counts = [0]
+    for index, character in enumerate(text):
+        if not character.isspace():
+            compact.append(character)
+            positions.append(index)
+        prefix_counts.append(len(compact))
+    return "".join(compact), positions, prefix_counts
+
+
+def alignment_blocks(clean_text: str, source_text: str) -> tuple[list[tuple[int, int, int]], list[int], list[int]]:
+    """Map compacted clean-text ranges to the original report."""
+    clean_compact, _, clean_prefix = compact_text(clean_text)
+    source_compact, source_positions, _ = compact_text(source_text)
+
+    shared_prefix = 0
+    for clean_character, source_character in zip(clean_compact, source_compact):
+        if clean_character != source_character:
+            break
+        shared_prefix += 1
+
+    # Bundles commonly append a mention table after an otherwise unchanged
+    # report. Avoid a more expensive sequence alignment in that common case.
+    if shared_prefix == min(len(clean_compact), len(source_compact)):
+        blocks = [(0, shared_prefix, 0)] if shared_prefix else []
+    else:
+        blocks = [
+            (block.a, block.a + block.size, block.b)
+            for block in difflib.SequenceMatcher(
+                None, clean_compact, source_compact, autojunk=False
+            ).get_matching_blocks()
+            if block.size
+        ]
+    return blocks, clean_prefix, source_positions
+
+
+def align_spans_to_source(
+    spans: list[Span], clean_text: str, source_text: str
+) -> tuple[list[Span], int]:
+    """Relocate tagged spans from cleaned bundle text into the source report."""
     aligned: list[Span] = []
     used: set[tuple[int, int]] = set()
     cursor = 0
     missing = 0
+    blocks, clean_prefix, source_positions = alignment_blocks(clean_text, source_text)
     for span in spans:
+        compact_start = clean_prefix[span.start]
+        compact_end = clean_prefix[span.end]
+        mapped: tuple[int, int] | None = None
+        if compact_start < compact_end:
+            block = next(
+                (
+                    (clean_start, clean_end, source_start)
+                    for clean_start, clean_end, source_start in blocks
+                    if clean_start <= compact_start and compact_end <= clean_end
+                ),
+                None,
+            )
+            if block is not None:
+                clean_start, _, source_start = block
+                source_compact_start = source_start + compact_start - clean_start
+                source_compact_end = source_start + compact_end - clean_start
+                mapped = (
+                    source_positions[source_compact_start],
+                    source_positions[source_compact_end - 1] + 1,
+                )
+
+        if mapped is not None and mapped not in used:
+            used.add(mapped)
+            cursor = max(cursor, mapped[1])
+            aligned.append(
+                Span(span.uid4, mapped[0], mapped[1], source_text[mapped[0]:mapped[1]])
+            )
+            continue
+
+        # Fall back for a mention inside a portion substantially rewritten by
+        # the model. This is deliberately secondary to document alignment so
+        # short strings such as "M" cannot steal an earlier occurrence.
         candidates = flexible_occurrences(source_text, span.mention)
         available = [candidate for candidate in candidates if candidate not in used]
         choice = next((candidate for candidate in available if candidate[0] >= cursor), None)
@@ -421,7 +496,7 @@ def main() -> int:
                 continue
             with open_text(source_files[0]) as handle:
                 coordinate_text = handle.read()
-            spans, alignment_missing = align_spans_to_source(spans, coordinate_text)
+            spans, alignment_missing = align_spans_to_source(spans, clean_text, coordinate_text)
             if alignment_missing:
                 print(
                     f"WARNING: {report.name}: {alignment_missing} tagged mentions "
