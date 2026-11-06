@@ -1,15 +1,7 @@
 """
 Assign jointly plausible timelines to mentions using LLM reasoning at the case report level.
 Outputs a JSON structure with reasoning and multiple plausible timelines.
-Usage:
-python assign_joint_timestamps.py \
---anchor-results ./data/joined_anchor_source.csv \
---case-report ./data/case_report.txt \
---mention-table ./data/10056200-DS_temporal.txt.gz \
---output ./data/10056200-DS_timelines.json \
---tau 0.1 \
---host localhost \
---port 8080
+
 """
 import pandas as pd
 from pathlib import Path
